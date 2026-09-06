@@ -1,0 +1,13 @@
+.build/
+.build-app/
+.build-cache/
+.build-check/
+.swiftpm/
+SafariBuild/
+dist/
+.DS_Store
+*.pem
+*.p12
+*.key
+xcuserdata/
+*.xcuserstate
