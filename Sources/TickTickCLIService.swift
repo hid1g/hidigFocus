@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct TickTickCLIService {
     struct ImportSnapshot {
@@ -94,21 +95,7 @@ struct TickTickCLIService {
         guard let executableURL = executableURL() else { throw TickTickCLIError.cliMissing }
         let projectsCommand = try await run(executableURL: executableURL, arguments: ["project", "list", "--json"])
         guard projectsCommand.status == 0 else { throw TickTickCLIError.commandFailed(projectsCommand.stderr) }
-        let projectRows = try objectRows(from: projectsCommand.stdout, preferredKey: "projects")
-        let lists: [TaskList] = projectRows.compactMap { row in
-            guard let id = row["id"] as? String, let name = row["name"] as? String else { return nil }
-            return TaskList(
-                name: name,
-                colorHex: row["color"] as? String ?? "#7A9B63",
-                sortOrder: Self.int64(row["sortOrder"]),
-                isPinned: false,
-                sourceID: id
-            )
-        }
-
-        let activeCommand = try await run(executableURL: executableURL, arguments: ["task", "filter", "--status", "0", "--json"])
-        guard activeCommand.status == 0 else { throw TickTickCLIError.commandFailed(activeCommand.stderr) }
-        var rows = try objectRows(from: activeCommand.stdout, preferredKey: "tasks")
+        var rows: [[String: Any]] = []
 
         var cursor = calendar.startOfDay(for: since)
         let finish = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) ?? endDate
@@ -118,24 +105,55 @@ struct TickTickCLIService {
             if ProcessInfo.processInfo.environment["HIDIGFOCUS_RUN_LIVE_IMPORT"] == "1" {
                 print("TICKTICK_IMPORT_FETCH \(DayKey.make(from: cursor))...\(DayKey.make(from: chunkEnd))")
             }
-            let result = try await run(executableURL: executableURL, arguments: [
-                "task", "completed",
-                "--start-date", formatter.string(from: cursor),
-                "--end-date", formatter.string(from: chunkEnd),
-                "--json"
-            ])
-            guard result.status == 0 else { throw TickTickCLIError.commandFailed(result.stderr) }
-            rows.append(contentsOf: try objectRows(from: result.stdout, preferredKey: "tasks"))
+            rows.append(contentsOf: try await completedRows(from: cursor, to: chunkEnd, executableURL: executableURL, formatter: formatter))
             cursor = chunkEnd
         }
 
-        // The same task can move from the active response to the completed response
-        // while an import is running. Keep the last row, because completed rows are
-        // appended after active rows and therefore carry the authoritative status.
+        // Recurring tasks reuse an ID: their completed occurrences must not replace
+        // the currently active occurrence. Fetch the current active state last.
+        let activeCommand = try await run(executableURL: executableURL, arguments: ["task", "filter", "--status", "0", "--json"])
+        guard activeCommand.status == 0 else { throw TickTickCLIError.commandFailed(activeCommand.stderr) }
+        rows.append(contentsOf: try objectRows(from: activeCommand.stdout, preferredKey: "tasks"))
+        return try importSnapshot(projects: projectsCommand.stdout, rows: rows)
+    }
+
+    private func completedRows(from start: Date, to end: Date, executableURL: URL, formatter: ISO8601DateFormatter) async throws -> [[String: Any]] {
+        let result = try await run(executableURL: executableURL, arguments: [
+            "task", "completed", "--start-date", formatter.string(from: start),
+            "--end-date", formatter.string(from: end), "--json"
+        ])
+        guard result.status == 0 else { throw TickTickCLIError.commandFailed(result.stderr) }
+        let rows = try objectRows(from: result.stdout, preferredKey: "tasks")
+        guard rows.count >= 200 else { return rows }
+        // The endpoint caps a response at 200. Split saturated windows instead
+        // of recording an incomplete history as a successful synchronization.
+        guard end.timeIntervalSince(start) > 2 else {
+            throw TickTickCLIError.commandFailed("TickTick ограничил историю выполненных задач. Повторите синхронизацию позже.")
+        }
+        let midpoint = Date(timeIntervalSince1970: floor((start.timeIntervalSince1970 + end.timeIntervalSince1970) / 2))
+        let first = try await completedRows(from: start, to: midpoint, executableURL: executableURL, formatter: formatter)
+        let second = try await completedRows(from: midpoint, to: end, executableURL: executableURL, formatter: formatter)
+        return first + second
+    }
+
+    func importSnapshot(projects: Data, rows: [[String: Any]]) throws -> ImportSnapshot {
+        let lists = try objectRows(from: projects, preferredKey: "projects").compactMap { row -> TaskList? in
+            guard let id = row["id"] as? String, let name = row["name"] as? String else { return nil }
+            return TaskList(name: name, colorHex: row["color"] as? String ?? "#7A9B63",
+                            sortOrder: Self.int64(row["sortOrder"]), sourceID: id)
+        }
         var rowsByID: [String: [String: Any]] = [:]
         var orderedIDs: [String] = []
         for row in rows {
             guard let id = row["id"] as? String else { continue }
+            if let existing = rowsByID[id] {
+                if (existing["status"] as? NSNumber)?.intValue == 0 { continue }
+                if (row["status"] as? NSNumber)?.intValue != 0 {
+                    let parser = TickTickDateParser()
+                    if (parser.parse(existing["completedTime"] as? String) ?? .distantPast)
+                        > (parser.parse(row["completedTime"] as? String) ?? .distantPast) { continue }
+                }
+            }
             if rowsByID[id] == nil { orderedIDs.append(id) }
             rowsByID[id] = row
         }
@@ -152,8 +170,8 @@ struct TickTickCLIService {
             preview: TaskImportPreview(
                 folders: 0,
                 lists: lists.count,
-                activeTasks: records.filter { $0.completedAt == nil }.count,
-                completedTasks: records.filter { $0.completedAt != nil }.count
+                activeTasks: records.filter { !$0.completed }.count,
+                completedTasks: records.filter { $0.completed }.count
             )
         )
     }
@@ -195,6 +213,7 @@ struct TickTickCLIService {
         let priority = TaskPriority(rawValue: priorityRaw) ?? .none
         let reminders = (row["reminders"] as? [String] ?? []).map { value in
             TaskReminder(
+                id: Self.stableID("\(id)-reminder-\(value)"),
                 date: dateParser.parse(value),
                 relativeMinutes: Self.reminderMinutes(value),
                 sourceValue: value
@@ -204,6 +223,7 @@ struct TickTickCLIService {
             guard let name = item["title"] as? String else { return nil }
             let status = (item["status"] as? NSNumber)?.intValue ?? item["status"] as? Int ?? 0
             return TaskChecklistItem(
+                id: Self.stableID("\(id)-item-\(item["id"] as? String ?? name)"),
                 title: name,
                 isCompleted: status == 1 || status == 2,
                 sortOrder: Self.int64(item["sortOrder"])
@@ -214,14 +234,17 @@ struct TickTickCLIService {
         let estimatedPomo = summaries.reduce(0) { $0 + ((($1["estimatedPomo"] as? NSNumber)?.intValue) ?? 0) }
         let pomoCount = summaries.reduce(0) { $0 + ((($1["pomoCount"] as? NSNumber)?.intValue) ?? 0) }
         let estimatedDuration = summaries.reduce(0) { $0 + ((($1["estimatedDuration"] as? NSNumber)?.intValue) ?? 0) }
+        let start = dateParser.parse(row["startDate"] as? String)
+        let due = dateParser.parse(row["dueDate"] as? String)
+        let duration = start.flatMap { start in due.map { Int($0.timeIntervalSince(start) / 60) } }
         return TickTickImportRecord(
             sourceID: id,
             projectSourceID: projectID,
             title: title,
             description: row["desc"] as? String ?? "",
             notes: row["content"] as? String ?? "",
-            startDate: dateParser.parse(row["startDate"] as? String),
-            dueDate: dateParser.parse(row["dueDate"] as? String),
+            startDate: start,
+            dueDate: due,
             completedAt: dateParser.parse(row["completedTime"] as? String),
             isAllDay: row["isAllDay"] as? Bool ?? false,
             timeZoneID: row["timeZone"] as? String ?? TimeZone.current.identifier,
@@ -233,8 +256,15 @@ struct TickTickCLIService {
             sortOrder: Self.int64(row["sortOrder"]),
             plannedPomodoros: estimatedPomo,
             completedPomodoros: pomoCount,
-            durationMinutes: estimatedDuration > 0 ? max(15, estimatedDuration / 60) : 30
+            durationMinutes: duration.map { max(15, $0) } ?? (estimatedDuration > 0 ? max(15, estimatedDuration / 60) : 30),
+            isCompleted: (row["status"] as? NSNumber).map { $0.intValue == 2 }
         )
+    }
+
+    private static func stableID(_ value: String) -> UUID {
+        let bytes = Array(SHA256.hash(data: Data(value.utf8)).prefix(16))
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 
     private static func int64(_ value: Any?) -> Int64 {

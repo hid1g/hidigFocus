@@ -42,7 +42,7 @@ struct TickTickView: View {
                         SectionEyebrow(text: "Перенос данных")
                         Text("Импорт TickTick")
                             .hidigFont(size: 20, weight: .bold, design: .rounded)
-                        Text("Сначала выполняется предварительный подсчёт. Перед записью создаётся резервная копия локального состояния; повторный импорт пропускает задачи с тем же исходным ID.")
+                        Text("Перед первым импортом создаётся резервная копия. Повторное обновление переносит из TickTick изменения дат, статусов, названий и списков без дублирования задач.")
                             .hidigFont(size: 12)
                             .foregroundStyle(HidigPalette.secondary)
                         if let preview = store.tickTickImportPreview {

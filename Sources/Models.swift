@@ -613,13 +613,14 @@ struct PersistedAppState: Codable {
     var activePomodoro: ActivePomodoro?
     var taskSettings = TaskSettings()
     var taskImportHistory: [TaskImportReport] = []
+    var lastPlannerSyncAt: Date?
     var googleCalendarConnection = GoogleCalendarConnection()
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, protectionEnabled, groups, habits, cachedTasks, localTasks, lastSuccessfulSync, events
         case disciplineStreak, disciplineLastCountedDayKey
         case taskFolders, taskLists, managedTasks, pomodoroSessions, activePomodoro, taskSettings
-        case taskImportHistory, googleCalendarConnection
+        case taskImportHistory, googleCalendarConnection, lastPlannerSyncAt
     }
 
     init() {}
@@ -644,6 +645,7 @@ struct PersistedAppState: Codable {
         activePomodoro = try container.decodeIfPresent(ActivePomodoro.self, forKey: .activePomodoro)
         taskSettings = try container.decodeIfPresent(TaskSettings.self, forKey: .taskSettings) ?? TaskSettings()
         taskImportHistory = try container.decodeIfPresent([TaskImportReport].self, forKey: .taskImportHistory) ?? []
+        lastPlannerSyncAt = try container.decodeIfPresent(Date.self, forKey: .lastPlannerSyncAt)
         googleCalendarConnection = try container.decodeIfPresent(GoogleCalendarConnection.self, forKey: .googleCalendarConnection) ?? GoogleCalendarConnection()
         schemaVersion = 2
     }

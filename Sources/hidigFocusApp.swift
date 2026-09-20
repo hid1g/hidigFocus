@@ -40,7 +40,6 @@ struct HidigFocusApp: App {
         Window("hidigFocus", id: "main") {
             RootView()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
-                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
@@ -64,7 +63,6 @@ struct HidigFocusApp: App {
         MenuBarExtra {
             MenuBarPanel()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
-                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
@@ -77,7 +75,6 @@ struct HidigFocusApp: App {
         Settings {
             SettingsView()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
-                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)

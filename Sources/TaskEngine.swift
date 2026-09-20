@@ -1,6 +1,6 @@
 import Foundation
 
-struct TickTickImportRecord: Equatable {
+struct TickTickImportRecord: Codable, Equatable {
     var sourceID: String
     var projectSourceID: String
     var title: String
@@ -20,6 +20,9 @@ struct TickTickImportRecord: Equatable {
     var plannedPomodoros = 0
     var completedPomodoros = 0
     var durationMinutes = 30
+    var isCompleted: Bool?
+
+    var completed: Bool { isCompleted ?? (completedAt != nil) }
 }
 
 struct TaskImportPreview: Equatable {
@@ -67,6 +70,18 @@ enum TaskEngine {
         state.managedTasks[index] = value
     }
 
+    static func applyEdits(from original: ManagedTask, to draft: ManagedTask, in state: inout PersistedAppState) {
+        guard var latest = state.managedTasks.first(where: { $0.id == draft.id }) else { return }
+        func merge<T: Equatable>(_ key: WritableKeyPath<ManagedTask, T>) {
+            if original[keyPath: key] != draft[keyPath: key] { latest[keyPath: key] = draft[keyPath: key] }
+        }
+        merge(\.title); merge(\.description); merge(\.notes); merge(\.listID)
+        merge(\.startDate); merge(\.dueDate); merge(\.durationMinutes); merge(\.isAllDay)
+        merge(\.timeZoneID); merge(\.priority); merge(\.tags); merge(\.checklist)
+        merge(\.repeatRule); merge(\.reminders)
+        updateTask(latest, in: &state)
+    }
+
     static func setCompleted(_ id: UUID, completed: Bool, in state: inout PersistedAppState, now: Date = Date()) {
         guard let index = state.managedTasks.firstIndex(where: { $0.id == id }) else { return }
         state.managedTasks[index].status = completed ? .completed : .active
@@ -103,6 +118,9 @@ enum TaskEngine {
         state.managedTasks[index].startDate = date
         if let durationMinutes { state.managedTasks[index].durationMinutes = max(15, durationMinutes) }
         if let allDay { state.managedTasks[index].isAllDay = allDay }
+        state.managedTasks[index].dueDate = date.map {
+            state.managedTasks[index].isAllDay ? $0 : $0.addingTimeInterval(Double(state.managedTasks[index].durationMinutes * 60))
+        }
         state.managedTasks[index].modifiedAt = now
     }
 
@@ -183,15 +201,19 @@ enum TaskEngine {
             startedAt: now,
             foldersFound: folders.count,
             listsFound: lists.count,
-            activeTasksFound: records.filter { $0.completedAt == nil }.count,
-            completedTasksFound: records.filter { $0.completedAt != nil }.count
+            activeTasksFound: records.filter { !$0.completed }.count,
+            completedTasksFound: records.filter { $0.completed }.count
         )
 
         for folder in folders where !state.taskFolders.contains(where: { $0.sourceID == folder.sourceID && folder.sourceID != nil }) {
             state.taskFolders.append(folder)
         }
-        for list in lists where !state.taskLists.contains(where: { $0.sourceID == list.sourceID && list.sourceID != nil }) {
-            state.taskLists.append(list)
+        for list in lists {
+            if let index = state.taskLists.firstIndex(where: { $0.sourceID == list.sourceID && list.sourceID != nil }) {
+                state.taskLists[index].name = list.name
+                state.taskLists[index].colorHex = list.colorHex
+                state.taskLists[index].sortOrder = list.sortOrder
+            } else { state.taskLists.append(list) }
         }
         let listBySource = Dictionary(uniqueKeysWithValues: state.taskLists.compactMap { list in
             list.sourceID.map { ($0, list.id) }
@@ -200,17 +222,44 @@ enum TaskEngine {
         for record in records {
             let listID = listBySource[record.projectSourceID] ?? TaskList.inboxID
             if let index = state.managedTasks.firstIndex(where: { $0.sourceName == "TickTick" && $0.sourceID == record.sourceID }) {
-                let desiredStatus: ManagedTaskStatus = record.completedAt == nil ? .active : .completed
-                let changed = state.managedTasks[index].status != desiredStatus
-                    || state.managedTasks[index].completedAt != record.completedAt
-                if changed {
-                    state.managedTasks[index].status = desiredStatus
-                    state.managedTasks[index].completedAt = record.completedAt
+                let original = state.managedTasks[index]
+                // Preserve local edits while the corresponding source field is unchanged.
+                // On the first reconciliation the source repairs stale legacy imports.
+                let previous = original.tickTickBaseline
+                func changed<T: Equatable>(_ key: KeyPath<TickTickImportRecord, T>) -> Bool {
+                    previous.map { $0[keyPath: key] != record[keyPath: key] } ?? true
+                }
+                if original.status != .trashed {
+                    if changed(\.title) { state.managedTasks[index].title = record.title }
+                    if changed(\.description) { state.managedTasks[index].description = record.description }
+                    if changed(\.notes) { state.managedTasks[index].notes = record.notes }
+                    if changed(\.projectSourceID) {
+                        state.managedTasks[index].listID = listID
+                        state.managedTasks[index].sourceListID = record.projectSourceID
+                    }
+                    if changed(\.startDate) || changed(\.dueDate) || changed(\.durationMinutes) || changed(\.isAllDay) {
+                        state.managedTasks[index].startDate = record.startDate
+                        state.managedTasks[index].dueDate = record.dueDate
+                        state.managedTasks[index].durationMinutes = record.durationMinutes
+                        state.managedTasks[index].isAllDay = record.isAllDay
+                    }
+                    if changed(\.timeZoneID) { state.managedTasks[index].timeZoneID = record.timeZoneID }
+                    if changed(\.priority) { state.managedTasks[index].priority = record.priority }
+                    if changed(\.tags) { state.managedTasks[index].tags = record.tags }
+                    if changed(\.repeatRule) { state.managedTasks[index].repeatRule = record.repeatRule }
+                    if changed(\.reminders) { state.managedTasks[index].reminders = record.reminders }
+                    if changed(\.checklist) { state.managedTasks[index].checklist = record.checklist }
+                    if changed(\.sortOrder) { state.managedTasks[index].sortOrder = record.sortOrder }
+                    if previous?.completed != record.completed || changed(\.completedAt) {
+                        state.managedTasks[index].status = record.completed ? .completed : .active
+                        state.managedTasks[index].completedAt = record.completedAt
+                    }
+                }
+                state.managedTasks[index].tickTickBaseline = record
+                if state.managedTasks[index] != original {
                     state.managedTasks[index].modifiedAt = now
                     state.managedTasks[index].changeHistory.insert(
-                        TaskChange(date: now, summary: desiredStatus == .completed
-                            ? "Статус обновлён из TickTick: выполнена"
-                            : "Статус обновлён из TickTick: активна"),
+                        TaskChange(date: now, summary: "Обновлено из TickTick"),
                         at: 0
                     )
                     report.updated += 1
@@ -239,14 +288,16 @@ enum TaskEngine {
                 checklist: record.checklist,
                 plannedPomodoros: record.plannedPomodoros,
                 completedPomodoros: record.completedPomodoros,
-                status: record.completedAt == nil ? .active : .completed,
+                status: record.completed ? .completed : .active,
                 completedAt: record.completedAt,
-                sortOrder: record.sortOrder
+                sortOrder: record.sortOrder,
+                tickTickBaseline: record
             ))
             report.imported += 1
         }
         report.finishedAt = now
         state.taskImportHistory.insert(report, at: 0)
+        state.taskImportHistory = Array(state.taskImportHistory.prefix(100))
         return report
     }
 

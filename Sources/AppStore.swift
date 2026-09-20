@@ -15,7 +15,7 @@ final class AppStore: NSObject, ObservableObject {
     @Published var selectedTaskID: UUID?
     @Published var taskSidebarSelection: TaskSidebarSelection = .today
     @Published var tasksPresentation: TasksPresentation = .list
-    @Published var taskCalendarMode: TaskCalendarMode = .week
+    @Published var taskCalendarMode: TaskCalendarMode = .fourDays
     @Published var taskCalendarAnchor = Date()
     @Published var errorMessage: String?
     @Published private(set) var isSynchronizing = false
@@ -146,8 +146,12 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func calendarTasks(on day: Date) -> [ManagedTask] {
-        state.managedTasks.filter {
-            $0.status != .trashed && $0.startDate.map { Calendar.current.isDate($0, inSameDayAs: day) } == true
+        let first = Calendar.current.startOfDay(for: day)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: first) ?? first
+        return state.managedTasks.filter {
+            guard $0.status != .trashed, let start = $0.startDate ?? $0.dueDate else { return false }
+            if $0.isAllDay { return Calendar.current.isDate(start, inSameDayAs: day) }
+            return start < end && ($0.calendarEndDate ?? start.addingTimeInterval(Double($0.durationMinutes * 60))) > first
         }.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
     }
 
@@ -464,6 +468,11 @@ final class AppStore: NSObject, ObservableObject {
         save()
     }
 
+    func updateManagedTaskEdits(from original: ManagedTask, to draft: ManagedTask) {
+        TaskEngine.applyEdits(from: original, to: draft, in: &state)
+        save()
+    }
+
     func setManagedTaskCompleted(_ id: UUID, completed: Bool) {
         TaskEngine.setCompleted(id, completed: completed, in: &state)
         save()
@@ -742,6 +751,15 @@ final class AppStore: NSObject, ObservableObject {
         isSynchronizing = true
         do {
             let tasks = try await tickTickService.todayTasks()
+            if state.managedTasks.contains(where: { $0.sourceName == "TickTick" }) {
+                let since = state.lastPlannerSyncAt.map { $0.addingTimeInterval(-86400) }
+                    ?? Calendar.current.date(byAdding: .month, value: -2, to: Date()) ?? Date()
+                let snapshot = try await tickTickService.fullImportSnapshot(since: since)
+                if state.lastPlannerSyncAt == nil { _ = try repository.createBackup(label: "before-planner-reconciliation") }
+                _ = TaskEngine.importTickTick(folders: snapshot.folders, lists: snapshot.lists,
+                                             records: snapshot.records, into: &state)
+                state.lastPlannerSyncAt = Date()
+            }
             let previous = state.cachedTasks
             state.cachedTasks = tasks
             state.lastSuccessfulSync = Date()

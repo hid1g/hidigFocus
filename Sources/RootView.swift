@@ -7,15 +7,21 @@ struct RootView: View {
     @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.sage.rawValue
     @AppStorage(HidigSettingsKeys.customSidebarColor) private var customSidebarColorHex = "#E5EFDA"
     @State private var showsDisableProtection = false
+    @AppStorage("navigationCollapsed") private var navigationCollapsed = true
+    @AppStorage("navigationWidth") private var navigationWidth = 206.0
 
     var body: some View {
         HStack(spacing: 0) {
             Sidebar(
                 showsDisableProtection: $showsDisableProtection,
+                isCollapsed: $navigationCollapsed,
                 backgroundColor: HidigPalette.sidebar,
                 foregroundColor: HidigPalette.forest
             )
-                .frame(width: 226)
+                .frame(width: navigationCollapsed ? 64 : navigationWidth)
+            if !navigationCollapsed {
+                PanelResizeHandle(width: $navigationWidth, bounds: 180...280)
+            }
 
             Group {
                 switch store.selectedSection {
@@ -62,6 +68,7 @@ private struct Sidebar: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var showsDisableProtection: Bool
+    @Binding var isCollapsed: Bool
     let backgroundColor: Color
     let foregroundColor: Color
 
@@ -74,29 +81,49 @@ private struct Sidebar: View {
                     .frame(width: 38, height: 38)
                     .background(Color.white.opacity(0.22))
                     .clipShape(RoundedRectangle(cornerRadius: 11))
-                VStack(alignment: .leading, spacing: 1) {
+                if !isCollapsed { VStack(alignment: .leading, spacing: 1) {
                     Text("hidigFocus")
                         .hidigFont(size: 17, weight: .semibold, design: .rounded)
                     Text("focus gate")
                         .hidigFont(size: 10, weight: .medium, design: .rounded)
                         .tracking(1)
                         .foregroundStyle(foregroundColor.opacity(0.68))
-                }
+                } }
             }
             .padding(.top, 48)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, isCollapsed ? 13 : 20)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { isCollapsed.toggle() }
+            } label: {
+                Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
+                    .frame(maxWidth: .infinity, minHeight: 30)
+            }.buttonStyle(.plain)
+                .help(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
+                .accessibilityLabel(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
+                .padding(.top, 12)
 
             VStack(spacing: 5) {
                 ForEach(AppSection.allCases) { section in
-                    SidebarButton(section: section, foregroundColor: foregroundColor)
+                    SidebarButton(section: section, foregroundColor: foregroundColor, isCollapsed: isCollapsed)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 35)
+            .padding(.horizontal, isCollapsed ? 8 : 12)
+            .padding(.top, 12)
 
             Spacer()
 
-            VStack(alignment: .leading, spacing: 11) {
+            if isCollapsed {
+                Button {
+                    if store.protectionEnabled { showsDisableProtection = true }
+                    else { store.setProtectionEnabled(true) }
+                } label: {
+                    Image(systemName: store.protectionEnabled ? "lock.shield.fill" : "lock.open")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.plain)
+                    .help(store.protectionEnabled ? "Защита включена" : "Включить защиту")
+                    .padding(.bottom, 14)
+            } else { VStack(alignment: .leading, spacing: 11) {
                 HStack(spacing: 8) {
                     StatusDot(isActive: store.protectionEnabled)
                     Text(store.protectionEnabled ? "Защита включена" : "Защита выключена")
@@ -123,6 +150,7 @@ private struct Sidebar: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding(14)
             .padding(.bottom, 8)
+            }
         }
         .foregroundStyle(foregroundColor)
         .background(backgroundColor)
@@ -137,6 +165,7 @@ private struct SidebarButton: View {
     @EnvironmentObject private var store: AppStore
     let section: AppSection
     let foregroundColor: Color
+    let isCollapsed: Bool
     @State private var isHovered = false
 
     var body: some View {
@@ -145,8 +174,7 @@ private struct SidebarButton: View {
         } label: {
             HStack(spacing: 11) {
                 Image(systemName: section.systemImage).frame(width: 18)
-                Text(section.title)
-                Spacer()
+                if !isCollapsed { Text(section.title); Spacer() }
             }
             .contentShape(Rectangle())
             .hidigFont(size: 13, weight: store.selectedSection == section ? .semibold : .regular)
@@ -157,6 +185,8 @@ private struct SidebarButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .help(section.title)
+        .accessibilityLabel(section.title)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
     }
@@ -164,6 +194,23 @@ private struct SidebarButton: View {
     private var background: Color {
         if store.selectedSection == section { return Color.white.opacity(0.2) }
         return isHovered ? Color.white.opacity(0.12) : .clear
+    }
+}
+
+struct PanelResizeHandle: View {
+    @Binding var width: Double
+    var bounds: ClosedRange<Double>
+    @State private var initialWidth: Double?
+    var body: some View {
+        Rectangle().fill(HidigPalette.line.opacity(0.5)).frame(width: 5)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 1).onChanged { value in
+                if initialWidth == nil { initialWidth = width }
+                width = min(bounds.upperBound, max(bounds.lowerBound, (initialWidth ?? width) + value.translation.width))
+            }.onEnded { _ in initialWidth = nil })
+            .onHover { inside in (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set() }
+            .onDisappear { NSCursor.arrow.set() }
+            .accessibilityLabel("Изменить ширину панели")
     }
 }
 

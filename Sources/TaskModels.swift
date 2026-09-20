@@ -17,6 +17,7 @@ enum TasksPresentation: String, CaseIterable, Identifiable {
 
 enum TaskCalendarMode: String, CaseIterable, Identifiable {
     case day
+    case fourDays
     case week
     case month
     case agenda
@@ -25,6 +26,7 @@ enum TaskCalendarMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .day: return "День"
+        case .fourDays: return "4 дня"
         case .week: return "Неделя"
         case .month: return "Месяц"
         case .agenda: return "Повестка"
@@ -204,6 +206,7 @@ struct ManagedTask: Identifiable, Codable, Equatable {
     var googleUpdatedAt: Date?
     var lastSyncedAt: Date?
     var changeHistory: [TaskChange] = []
+    var tickTickBaseline: TickTickImportRecord?
 
     var quadrant: EisenhowerQuadrant {
         get {
