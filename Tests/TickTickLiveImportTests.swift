@@ -21,6 +21,6 @@ final class TickTickLiveImportTests: XCTestCase {
         XCTAssertEqual(state.managedTasks.count, before + report.imported)
         XCTAssertEqual(Set(state.managedTasks.compactMap(\.sourceID)).count, state.managedTasks.compactMap(\.sourceID).count)
         let backupName = backup?.lastPathComponent ?? "none"
-        print("TICKTICK_IMPORT lists=\(snapshot.preview.lists) active=\(snapshot.preview.activeTasks) completed=\(snapshot.preview.completedTasks) imported=\(report.imported) skipped=\(report.skipped) failed=\(report.failed) backup=\(backupName)")
+        print("TICKTICK_IMPORT lists=\(snapshot.preview.lists) active=\(snapshot.preview.activeTasks) completed=\(snapshot.preview.completedTasks) imported=\(report.imported) updated=\(report.updated) skipped=\(report.skipped) failed=\(report.failed) backup=\(backupName)")
     }
 }

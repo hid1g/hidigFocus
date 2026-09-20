@@ -282,8 +282,50 @@ struct TaskImportReport: Identifiable, Codable, Equatable {
     var activeTasksFound = 0
     var completedTasksFound = 0
     var imported = 0
+    var updated = 0
     var skipped = 0
     var failed = 0
+
+    private enum CodingKeys: String, CodingKey {
+        case id, source, startedAt, finishedAt, foldersFound, listsFound
+        case activeTasksFound, completedTasksFound, imported, updated, skipped, failed
+    }
+
+    init(
+        id: UUID = UUID(), source: String = "TickTick", startedAt: Date = Date(),
+        finishedAt: Date? = nil, foldersFound: Int = 0, listsFound: Int = 0,
+        activeTasksFound: Int = 0, completedTasksFound: Int = 0,
+        imported: Int = 0, updated: Int = 0, skipped: Int = 0, failed: Int = 0
+    ) {
+        self.id = id
+        self.source = source
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.foldersFound = foldersFound
+        self.listsFound = listsFound
+        self.activeTasksFound = activeTasksFound
+        self.completedTasksFound = completedTasksFound
+        self.imported = imported
+        self.updated = updated
+        self.skipped = skipped
+        self.failed = failed
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "TickTick"
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date()
+        finishedAt = try container.decodeIfPresent(Date.self, forKey: .finishedAt)
+        foldersFound = try container.decodeIfPresent(Int.self, forKey: .foldersFound) ?? 0
+        listsFound = try container.decodeIfPresent(Int.self, forKey: .listsFound) ?? 0
+        activeTasksFound = try container.decodeIfPresent(Int.self, forKey: .activeTasksFound) ?? 0
+        completedTasksFound = try container.decodeIfPresent(Int.self, forKey: .completedTasksFound) ?? 0
+        imported = try container.decodeIfPresent(Int.self, forKey: .imported) ?? 0
+        updated = try container.decodeIfPresent(Int.self, forKey: .updated) ?? 0
+        skipped = try container.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
+        failed = try container.decodeIfPresent(Int.self, forKey: .failed) ?? 0
+    }
 }
 
 struct GoogleCalendarConnection: Codable, Equatable {

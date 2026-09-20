@@ -60,7 +60,7 @@ struct TickTickView: View {
                                 .disabled(store.connectionState != .connected || store.isImportingTickTick)
                         }
                         if let report = store.state.taskImportHistory.first {
-                            Text("Последний импорт: перенесено — \(report.imported), пропущено — \(report.skipped), ошибок — \(report.failed).")
+                            Text("Последний импорт: добавлено — \(report.imported), обновлено — \(report.updated), без изменений — \(report.skipped), ошибок — \(report.failed).")
                                 .hidigFont(size: 11)
                                 .foregroundStyle(HidigPalette.secondary)
                         }

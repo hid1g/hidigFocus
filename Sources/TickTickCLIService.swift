@@ -129,12 +129,20 @@ struct TickTickCLIService {
             cursor = chunkEnd
         }
 
-        var seen = Set<String>()
-        let records = rows.compactMap { row -> TickTickImportRecord? in
-            guard let id = row["id"] as? String,
+        // The same task can move from the active response to the completed response
+        // while an import is running. Keep the last row, because completed rows are
+        // appended after active rows and therefore carry the authoritative status.
+        var rowsByID: [String: [String: Any]] = [:]
+        var orderedIDs: [String] = []
+        for row in rows {
+            guard let id = row["id"] as? String else { continue }
+            if rowsByID[id] == nil { orderedIDs.append(id) }
+            rowsByID[id] = row
+        }
+        let records = orderedIDs.compactMap { id -> TickTickImportRecord? in
+            guard let row = rowsByID[id],
                   let projectID = row["projectId"] as? String,
-                  let title = row["title"] as? String,
-                  seen.insert(id).inserted else { return nil }
+                  let title = row["title"] as? String else { return nil }
             return parseImportRecord(row, id: id, projectID: projectID, title: title)
         }
         return ImportSnapshot(

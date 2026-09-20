@@ -121,4 +121,31 @@ final class TaskEngineTests: XCTestCase {
         XCTAssertEqual(state.managedTasks.count, 3)
         XCTAssertEqual(TaskEngine.completedTasks(in: state).map(\.sourceID), ["new", "old"])
     }
+
+    func testTickTickReimportReconcilesCompletedAndReopenedStatuses() throws {
+        var state = PersistedAppState()
+        let list = TaskList(name: "TickTick список", sourceID: "project-1")
+        let completedAt = Date(timeIntervalSince1970: 3_000)
+        let active = TickTickImportRecord(sourceID: "task-1", projectSourceID: "project-1", title: "Задача")
+        _ = TaskEngine.importTickTick(folders: [], lists: [list], records: [active], into: &state)
+
+        var completed = active
+        completed.completedAt = completedAt
+        let completionReport = TaskEngine.importTickTick(
+            folders: [], lists: [list], records: [completed], into: &state,
+            now: Date(timeIntervalSince1970: 4_000)
+        )
+        XCTAssertEqual(completionReport.updated, 1)
+        XCTAssertEqual(completionReport.skipped, 0)
+        XCTAssertEqual(state.managedTasks.first?.status, .completed)
+        XCTAssertEqual(state.managedTasks.first?.completedAt, completedAt)
+
+        let reopenReport = TaskEngine.importTickTick(
+            folders: [], lists: [list], records: [active], into: &state,
+            now: Date(timeIntervalSince1970: 5_000)
+        )
+        XCTAssertEqual(reopenReport.updated, 1)
+        XCTAssertEqual(state.managedTasks.first?.status, .active)
+        XCTAssertNil(state.managedTasks.first?.completedAt)
+    }
 }

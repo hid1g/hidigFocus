@@ -199,8 +199,24 @@ enum TaskEngine {
 
         for record in records {
             let listID = listBySource[record.projectSourceID] ?? TaskList.inboxID
-            if state.managedTasks.contains(where: { $0.sourceName == "TickTick" && $0.sourceID == record.sourceID }) {
-                report.skipped += 1
+            if let index = state.managedTasks.firstIndex(where: { $0.sourceName == "TickTick" && $0.sourceID == record.sourceID }) {
+                let desiredStatus: ManagedTaskStatus = record.completedAt == nil ? .active : .completed
+                let changed = state.managedTasks[index].status != desiredStatus
+                    || state.managedTasks[index].completedAt != record.completedAt
+                if changed {
+                    state.managedTasks[index].status = desiredStatus
+                    state.managedTasks[index].completedAt = record.completedAt
+                    state.managedTasks[index].modifiedAt = now
+                    state.managedTasks[index].changeHistory.insert(
+                        TaskChange(date: now, summary: desiredStatus == .completed
+                            ? "Статус обновлён из TickTick: выполнена"
+                            : "Статус обновлён из TickTick: активна"),
+                        at: 0
+                    )
+                    report.updated += 1
+                } else {
+                    report.skipped += 1
+                }
                 continue
             }
             state.managedTasks.append(ManagedTask(
