@@ -11,3 +11,5 @@ dist/
 *.key
 xcuserdata/
 *.xcuserstate
+
+.build-tasks/

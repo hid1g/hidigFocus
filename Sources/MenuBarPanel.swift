@@ -2,22 +2,22 @@ import AppKit
 import SwiftUI
 
 struct MenuBarPanel: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             header
-            Divider().overlay(HidigPalette.line)
             taskProgress
-            Divider().overlay(HidigPalette.line)
             habits
-            Divider().overlay(HidigPalette.line)
             footer
         }
-        .frame(width: 330)
+        .padding(10)
+        .frame(width: 350)
         .foregroundStyle(HidigPalette.forest)
-        .background(HidigPalette.surface)
+        .background(HidigPalette.canvas)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var header: some View {
@@ -36,7 +36,10 @@ struct MenuBarPanel: View {
             Spacer()
             SyncButton(showTitle: false)
         }
-        .padding(16)
+        .padding(15)
+        .background(HidigPalette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var taskProgress: some View {
@@ -53,7 +56,10 @@ struct MenuBarPanel: View {
                 .hidigFont(size: 11)
                 .foregroundStyle(HidigPalette.secondary)
         }
-        .padding(16)
+        .padding(15)
+        .background(HidigPalette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var habits: some View {
@@ -61,30 +67,33 @@ struct MenuBarPanel: View {
             HStack {
                 SectionEyebrow(text: "Привычки")
                 Spacer()
-                Text("\(checkedHabits)/\(store.habits.count)")
+                Text("\(checkedHabits)/\(store.habitsDueToday.count)")
                     .hidigFont(size: 11, weight: .bold)
                     .foregroundStyle(HidigPalette.secondary)
             }
-            if store.habits.isEmpty {
-                Text("Добавьте привычку в основном окне.")
+            if store.habitsDueToday.isEmpty {
+                Text(store.habits.isEmpty ? "Добавьте привычку в основном окне." : "На сегодня привычек нет.")
                     .hidigFont(size: 11)
                     .foregroundStyle(HidigPalette.secondary)
             } else {
-                ForEach(store.habits.prefix(5)) { habit in
+                ForEach(store.habitsDueToday.prefix(5)) { habit in
                     HidigCheckboxRow(
                         title: habit.name,
                         isOn: habit.isChecked(on: Date()),
                         action: { store.toggleHabit(habit.id) }
                     )
                 }
-                if store.habits.count > 5 {
-                    Text("Ещё \(store.habits.count - 5)")
+                if store.habitsDueToday.count > 5 {
+                    Text("Ещё \(store.habitsDueToday.count - 5)")
                         .hidigFont(size: 10, weight: .medium)
                         .foregroundStyle(HidigPalette.secondary)
                 }
             }
         }
-        .padding(16)
+        .padding(15)
+        .background(HidigPalette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var footer: some View {
@@ -98,11 +107,14 @@ struct MenuBarPanel: View {
             Button("Завершить") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(GhostButtonStyle())
         }
-        .padding(14)
+        .padding(12)
+        .background(HidigPalette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     private var checkedHabits: Int {
-        store.habits.filter { $0.isChecked(on: Date()) }.count
+        store.habitsDueToday.filter { $0.isChecked(on: Date()) }.count
     }
 
     private var taskStatus: String {

@@ -19,8 +19,10 @@ enum HidigPalette {
     static var disabledFill: Color { themed(\.disabled) }
 
     private static func themed(_ keyPath: KeyPath<HidigThemeColors, String>) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let colors = SidebarColorResolver.currentTheme(for: appearance)
+        let preference = UserDefaults.standard.string(forKey: HidigSettingsKeys.sidebarColor)
+            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .sage
+        return Color(nsColor: NSColor(name: NSColor.Name("\(preference.rawValue)-\(keyPath)")) { appearance in
+            let colors = preference.theme(isDark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
             return NSColor(hex: colors[keyPath: keyPath])
         })
     }
@@ -43,6 +45,7 @@ enum HidigPalette {
 }
 
 struct SectionEyebrow: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let text: String
     var body: some View {
         Text(text.uppercased())
@@ -53,6 +56,7 @@ struct SectionEyebrow: View {
 }
 
 struct PageTitle: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let eyebrow: String
     let title: String
     let subtitle: String
@@ -71,6 +75,7 @@ struct PageTitle: View {
 }
 
 struct SoftPanel<Content: View>: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
@@ -148,6 +153,7 @@ struct SelectionRowButtonStyle: ButtonStyle {
 }
 
 private struct SelectionRowButtonBody<Label: View>: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @State private var isHovered = false
 
     let label: Label
@@ -177,6 +183,7 @@ private struct SelectionRowButtonBody<Label: View>: View {
 }
 
 private struct HidigIconButtonBody<Label: View>: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
@@ -221,6 +228,7 @@ private enum HidigButtonKind {
 }
 
 private struct HidigButtonBody<Label: View>: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
@@ -290,6 +298,7 @@ private struct HidigButtonBody<Label: View>: View {
 }
 
 struct HidigCheckmarkBox: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let isChecked: Bool
     var isEnabled = true
     var isHovered = false
@@ -324,6 +333,7 @@ struct HidigCheckmarkBox: View {
 }
 
 struct HidigCheckboxRow: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let title: String
     let isOn: Bool
     let action: () -> Void
@@ -374,6 +384,7 @@ struct HidigTextFieldStyle: TextFieldStyle {
 }
 
 struct StatusDot: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let isActive: Bool
     var body: some View {
         Circle()

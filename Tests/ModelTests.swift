@@ -2,8 +2,9 @@ import XCTest
 @testable import hidigFocus
 
 final class ModelTests: XCTestCase {
-    func testSidebarStartsWithGroups() {
-        XCTAssertEqual(AppSection.allCases.first, .groups)
+    func testTasksAppearImmediatelyBeforeGroups() {
+        XCTAssertEqual(AppSection.allCases.first, .tasks)
+        XCTAssertEqual(AppSection.allCases.dropFirst().first, .groups)
     }
 
     func testEveryPaletteHasDistinctLightAndDarkColors() {
@@ -162,5 +163,94 @@ final class ModelTests: XCTestCase {
         let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 8, day: 31, hour: 10)))
 
         XCTAssertNil(BlockSchedule.allDayEveryDay.nextInactiveDate(after: now, calendar: calendar))
+    }
+
+    func testLegacyHabitKeepsDataAndDefaultsToDailySchedule() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "name": "Старая привычка",
+          "createdAt": "2026-08-20T09:00:00Z",
+          "checkInDayKeys": ["2026-08-28", "2026-08-29"]
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let habit = try decoder.decode(Habit.self, from: Data(json.utf8))
+
+        XCTAssertEqual(habit.id, id)
+        XCTAssertEqual(habit.name, "Старая привычка")
+        XCTAssertEqual(habit.checkInDayKeys, Set(["2026-08-28", "2026-08-29"]))
+        XCTAssertEqual(habit.priority, .normal)
+        XCTAssertEqual(habit.schedule, .everyDay)
+    }
+
+    func testWeekdayHabitIgnoresWeekendInSchedule() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let friday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 4, hour: 12)))
+        let saturday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 5, hour: 12)))
+        let habit = Habit(
+            name: "Рабочий ритм",
+            createdAt: friday,
+            checkInDayKeys: [DayKey.make(from: friday, calendar: calendar)],
+            schedule: HabitSchedule(kind: .weekdays, weekdays: Set(2...6))
+        )
+
+        XCTAssertTrue(habit.isScheduled(on: friday, calendar: calendar))
+        XCTAssertFalse(habit.isScheduled(on: saturday, calendar: calendar))
+    }
+
+    func testIntervalHabitUsesCreationDateAsAnchor() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12)))
+        let thirdDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: start))
+        let fourthDay = try XCTUnwrap(calendar.date(byAdding: .day, value: 3, to: start))
+        let habit = Habit(
+            name: "Каждые три дня",
+            createdAt: start,
+            schedule: HabitSchedule(kind: .interval, intervalDays: 3)
+        )
+
+        XCTAssertFalse(habit.isScheduled(on: thirdDay, calendar: calendar))
+        XCTAssertTrue(habit.isScheduled(on: fourthDay, calendar: calendar))
+    }
+
+    func testWeeklyGoalReportsCurrentProgress() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let monday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 12)))
+        let tuesday = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: monday))
+        let habit = Habit(
+            name: "Тренировка",
+            createdAt: monday,
+            checkInDayKeys: [DayKey.make(from: monday, calendar: calendar), DayKey.make(from: tuesday, calendar: calendar)],
+            schedule: HabitSchedule(kind: .weeklyGoal, targetCount: 3)
+        )
+
+        let progress = habit.progress(on: tuesday, calendar: calendar)
+        XCTAssertEqual(progress.completed, 2)
+        XCTAssertEqual(progress.target, 3)
+        XCTAssertTrue(habit.isDue(on: tuesday, calendar: calendar))
+    }
+
+    func testWeeklyGoalStreakDoesNotReturnAfterReset() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let monday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 12)))
+        let tuesday = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: monday))
+        let habit = Habit(
+            name: "Тренировка",
+            createdAt: monday,
+            checkInDayKeys: [DayKey.make(from: monday, calendar: calendar)],
+            streakResetDayKey: DayKey.make(from: tuesday, calendar: calendar),
+            schedule: HabitSchedule(kind: .weeklyGoal, targetCount: 1)
+        )
+
+        XCTAssertEqual(habit.progress(on: tuesday, calendar: calendar).completed, 1)
+        XCTAssertEqual(habit.currentStreak(referenceDate: tuesday, calendar: calendar), 0)
     }
 }

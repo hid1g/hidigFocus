@@ -1,10 +1,17 @@
 import AppKit
+import CSQLite
 import Foundation
 
 struct AppStateRepository {
     private let fileManager = FileManager.default
+    private let directoryOverride: URL?
+
+    init(applicationSupportDirectory: URL? = nil) {
+        directoryOverride = applicationSupportDirectory
+    }
 
     var applicationSupportDirectory: URL {
+        if let directoryOverride { return directoryOverride }
         let root = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return root.appendingPathComponent("hidigFocus", isDirectory: true)
     }
@@ -13,12 +20,25 @@ struct AppStateRepository {
         applicationSupportDirectory.appendingPathComponent("state.json")
     }
 
+    private var databaseURL: URL {
+        applicationSupportDirectory.appendingPathComponent("tasks.sqlite3")
+    }
+
     func load() throws -> PersistedAppState {
-        guard fileManager.fileExists(atPath: stateURL.path) else {
-            return PersistedAppState()
+        try fileManager.createDirectory(at: applicationSupportDirectory, withIntermediateDirectories: true)
+        let database = try openDatabase()
+        defer { sqlite3_close(database) }
+        try migrate(database)
+        if let data = try readSnapshot(database) {
+            return try JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data)
         }
-        let data = try Data(contentsOf: stateURL)
-        return try JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data)
+        if fileManager.fileExists(atPath: stateURL.path) {
+            let data = try Data(contentsOf: stateURL)
+            let state = try JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data)
+            try writeSnapshot(data, database: database)
+            return state
+        }
+        return PersistedAppState()
     }
 
     func save(_ state: PersistedAppState) throws {
@@ -27,7 +47,84 @@ struct AppStateRepository {
             withIntermediateDirectories: true
         )
         let data = try JSONEncoder.hidigFocus.encode(state)
-        try data.write(to: stateURL, options: .atomic)
+        let database = try openDatabase()
+        defer { sqlite3_close(database) }
+        try migrate(database)
+        try writeSnapshot(data, database: database)
+    }
+
+    @discardableResult
+    func createBackup(label: String = "before-task-import") throws -> URL? {
+        let source = fileManager.fileExists(atPath: databaseURL.path) ? databaseURL : stateURL
+        guard fileManager.fileExists(atPath: source.path) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let destination = applicationSupportDirectory.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent)-\(label)-\(formatter.string(from: Date())).\(source.pathExtension)")
+        try fileManager.copyItem(at: source, to: destination)
+        return destination
+    }
+
+    private func openDatabase() throws -> OpaquePointer {
+        var database: OpaquePointer?
+        let status = sqlite3_open_v2(databaseURL.path, &database, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil)
+        guard status == SQLITE_OK, let database else {
+            if let database { sqlite3_close(database) }
+            throw PersistenceError.sqlite("Не удалось открыть локальную базу данных.")
+        }
+        return database
+    }
+
+    private func migrate(_ database: OpaquePointer) throws {
+        try execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)", database: database)
+        try execute("CREATE TABLE IF NOT EXISTS state_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), schema_version INTEGER NOT NULL, payload BLOB NOT NULL, updated_at TEXT NOT NULL)", database: database)
+        try execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'))", database: database)
+    }
+
+    private func readSnapshot(_ database: OpaquePointer) throws -> Data? {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "SELECT payload FROM state_snapshot WHERE id = 1", -1, &statement, nil) == SQLITE_OK else {
+            throw PersistenceError.sqlite(message(database))
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard let bytes = sqlite3_column_blob(statement, 0), count > 0 else { return nil }
+        return Data(bytes: bytes, count: count)
+    }
+
+    private func writeSnapshot(_ data: Data, database: OpaquePointer) throws {
+        try execute("BEGIN IMMEDIATE", database: database)
+        do {
+            var statement: OpaquePointer?
+            let sql = "INSERT INTO state_snapshot(id, schema_version, payload, updated_at) VALUES (1, 2, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version, payload=excluded.payload, updated_at=excluded.updated_at"
+            guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw PersistenceError.sqlite(message(database)) }
+            defer { sqlite3_finalize(statement) }
+            let status = data.withUnsafeBytes { rawBuffer in
+                sqlite3_bind_blob(statement, 1, rawBuffer.baseAddress, Int32(data.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            }
+            guard status == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE else { throw PersistenceError.sqlite(message(database)) }
+            try execute("COMMIT", database: database)
+        } catch {
+            try? execute("ROLLBACK", database: database)
+            throw error
+        }
+    }
+
+    private func execute(_ sql: String, database: OpaquePointer) throws {
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else { throw PersistenceError.sqlite(message(database)) }
+    }
+
+    private func message(_ database: OpaquePointer) -> String {
+        sqlite3_errmsg(database).map(String.init(cString:)) ?? "Неизвестная ошибка SQLite."
+    }
+}
+
+private enum PersistenceError: LocalizedError {
+    case sqlite(String)
+    var errorDescription: String? {
+        if case .sqlite(let message) = self { return message }
+        return nil
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct GroupsView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @State private var showsNewGroup = false
     @State private var showsAddDomain = false
@@ -293,6 +294,7 @@ private enum TaskListFilter: String, CaseIterable, Identifiable {
 }
 
 private struct TaskSelectionList: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let group: BlockGroup
 
@@ -403,6 +405,7 @@ private struct TaskSelectionList: View {
 }
 
 private struct AccessModeSelector: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let selected: GroupAccessMode
     let onChange: (GroupAccessMode) -> Void
 
@@ -437,6 +440,7 @@ private struct AccessModeSelector: View {
 }
 
 private struct BlockScheduleEditor: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let schedule: BlockSchedule
     let onChange: (BlockSchedule) -> Void
 
@@ -582,6 +586,7 @@ private struct ScheduleChoiceButtonStyle: ButtonStyle {
 }
 
 private struct ScheduleChoiceButtonBody<Label: View>: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @State private var isHovered = false
 
     let label: Label
@@ -617,6 +622,7 @@ private struct ScheduleChoiceButtonBody<Label: View>: View {
 }
 
 private struct TaskRequirementSelector: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let requiresAllTasks: Bool
     let onChange: (Bool) -> Void
 
@@ -655,6 +661,7 @@ private struct TaskRequirementSelector: View {
 }
 
 private struct NewGroupSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var isPresented: Bool
     @State private var name = ""
@@ -683,6 +690,7 @@ private struct NewGroupSheet: View {
 }
 
 private struct RenameGroupSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let target: GroupRenameTarget
     @Binding var isPresented: Bool
@@ -723,6 +731,7 @@ private struct RenameGroupSheet: View {
 }
 
 private struct AddDomainSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let groupID: UUID
     @Binding var isPresented: Bool
@@ -761,6 +770,7 @@ private struct AddDomainSheet: View {
 }
 
 private struct EditResourceSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let target: ResourceEditTarget
     @Binding var isPresented: Bool

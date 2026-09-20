@@ -11,8 +11,14 @@ let package = Package(
         .executable(name: "hidigFocus", targets: ["hidigFocus"])
     ],
     targets: [
+        .systemLibrary(
+            name: "CSQLite",
+            path: "CSQLite",
+            pkgConfig: "sqlite3"
+        ),
         .executableTarget(
             name: "hidigFocus",
+            dependencies: ["CSQLite"],
             path: "Sources",
             exclude: ["Resources/SafariExtension"],
             resources: [
@@ -22,7 +28,7 @@ let package = Package(
         ),
         .testTarget(
             name: "hidigFocusTests",
-            dependencies: ["hidigFocus"],
+            dependencies: ["hidigFocus", "CSQLite"],
             path: "Tests"
         )
     ]

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct JournalView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @State private var showsGuide = false
 
@@ -332,6 +333,7 @@ private struct LiveMarkdownEditor: NSViewRepresentable {
 }
 
 private struct ObsidianGuideSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var isPresented: Bool
 

@@ -84,7 +84,15 @@ private struct HidigTextScaleKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1
 }
 
+private struct HidigPaletteIdentityKey: EnvironmentKey {
+    static let defaultValue = ""
+}
+
 extension EnvironmentValues {
+    var hidigPaletteIdentity: String {
+        get { self[HidigPaletteIdentityKey.self] }
+        set { self[HidigPaletteIdentityKey.self] = newValue }
+    }
     var hidigFontPreference: HidigFontPreference {
         get { self[HidigFontPreferenceKey.self] }
         set { self[HidigFontPreferenceKey.self] = newValue }
@@ -200,9 +208,11 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     case dark
     case purple
     case aurora
+    case blue
+    case amber
     case rose
 
-    static let allCases: [AppIconPreference] = [.green, .light, .dark, .rose]
+    static let allCases: [AppIconPreference] = [.green, .light, .dark, .rose, .purple, .aurora, .blue, .amber]
 
     var id: String { rawValue }
 
@@ -213,6 +223,8 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
         case .dark: return "Графитовая"
         case .purple: return "Фиолетовая"
         case .aurora: return "Аврора"
+        case .blue: return "Синяя"
+        case .amber: return "Янтарная"
         case .rose: return "Розовая"
         }
     }
@@ -223,6 +235,8 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
         case .purple: return .degrees(78)
         case .aurora: return .degrees(318)
         case .rose: return .degrees(220)
+        case .blue: return .degrees(145)
+        case .amber: return .degrees(280)
         }
     }
 
@@ -231,7 +245,7 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
         case .light: return 0.52
         case .green: return 1
         case .dark: return 0
-        case .purple, .rose: return 0.9
+        case .purple, .rose, .blue, .amber: return 0.9
         case .aurora: return 1.18
         }
     }
@@ -239,16 +253,13 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     var brightness: Double {
         switch self {
         case .light: return 0.12
-        case .green, .purple, .aurora, .rose: return 0
+        case .green, .purple, .aurora, .rose, .blue, .amber: return 0
         case .dark: return -0.12
         }
     }
 
     var normalized: AppIconPreference {
-        switch self {
-        case .purple, .aurora: return .rose
-        default: return self
-        }
+        self
     }
 }
 
@@ -286,6 +297,7 @@ enum AppAppearanceController {
 }
 
 enum AppIconController {
+    private static var appliedStyle: AppIconPreference?
     static let originalIcon: NSImage = {
         if let url = Bundle.module.url(forResource: "hidigFocus-icon-master", withExtension: "png"),
            let image = NSImage(contentsOf: url) {
@@ -296,11 +308,30 @@ enum AppIconController {
     }()
 
     @MainActor
+    static func exportIconSet(_ style: AppIconPreference, to directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for size in [16, 32, 128, 256, 512] {
+            for scale in [1, 2] {
+                let renderer = ImageRenderer(content: AppIconPreview(style: style, size: CGFloat(size)))
+                renderer.scale = CGFloat(scale)
+                guard let cgImage = renderer.cgImage,
+                      let data = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:]) else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                let suffix = scale == 2 ? "@2x" : ""
+                try data.write(to: directory.appendingPathComponent("icon_\(size)x\(size)\(suffix).png"))
+            }
+        }
+    }
+
+    @MainActor
     static func apply(_ style: AppIconPreference) {
+        guard appliedStyle != style else { return }
         let renderer = ImageRenderer(content: AppIconPreview(style: style.normalized, size: 1024))
         renderer.scale = 1
         if let image = renderer.nsImage {
             NSApplication.shared.applicationIconImage = image
+            appliedStyle = style
             let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
             imageView.image = image
             imageView.imageScaling = .scaleProportionallyUpOrDown

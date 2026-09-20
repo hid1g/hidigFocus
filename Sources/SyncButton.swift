@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SyncButton: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     var showTitle = true
 

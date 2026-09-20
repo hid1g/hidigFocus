@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TodayView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @State private var selectedProjectID = "all"
     @State private var showsCompletedTasks = false
@@ -286,11 +287,18 @@ struct TodayView: View {
                     .buttonStyle(GhostButtonStyle())
             }
             SoftPanel {
-                VStack(spacing: 0) {
-                    ForEach(store.habits) { habit in
-                        HabitCompactRow(habit: habit)
-                        if habit.id != store.habits.last?.id {
-                            Divider().overlay(HidigPalette.line.opacity(0.55))
+                if store.habitsDueToday.isEmpty {
+                    Text("На сегодня привычек нет.")
+                        .hidigFont(size: 12)
+                        .foregroundStyle(HidigPalette.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(store.habitsDueToday) { habit in
+                            HabitCompactRow(habit: habit)
+                            if habit.id != store.habitsDueToday.last?.id {
+                                Divider().overlay(HidigPalette.line.opacity(0.55))
+                            }
                         }
                     }
                 }
@@ -338,6 +346,7 @@ private struct TodayTaskProjectGroup: Identifiable {
 }
 
 private struct HabitCompactRow: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let habit: Habit
     @State private var isHovered = false
@@ -353,13 +362,35 @@ private struct HabitCompactRow: View {
             }
             .buttonStyle(.plain)
             .onHover { isHovered = $0 }
-            Text(habit.name)
-                .hidigFont(size: 14, weight: .medium)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(habit.name)
+                        .hidigFont(size: 14, weight: .medium)
+                    if habit.priority != .normal {
+                        Text(habit.priority.title)
+                            .hidigFont(size: 8, weight: .bold)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(HidigPalette.lettuce)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text(habit.schedule.summary)
+                    .hidigFont(size: 9, weight: .medium)
+                    .foregroundStyle(HidigPalette.secondary)
+            }
             Spacer()
-            Text("серия \(RussianPluralizer.phrase(habit.currentStreak(), one: "день", few: "дня", many: "дней"))")
+            Text(statusText)
                 .hidigFont(size: 11, weight: .semibold)
                 .foregroundStyle(HidigPalette.secondary)
         }
         .padding(.vertical, 10)
+    }
+
+    private var statusText: String {
+        if let progress = habit.progressDescription {
+            return "прогресс \(progress)"
+        }
+        return "серия \(RussianPluralizer.phrase(habit.currentStreak(), one: "день", few: "дня", many: "дней"))"
     }
 }

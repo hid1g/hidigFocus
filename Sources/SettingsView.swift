@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
 
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
@@ -119,7 +120,7 @@ struct SettingsView: View {
 
             Divider().overlay(HidigPalette.line).padding(.vertical, 3)
             settingLabel("Иконка в Dock")
-            HStack(spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                 ForEach(AppIconPreference.allCases) { option in
                     Button { appIconRaw = option.rawValue } label: {
                         VStack(spacing: 7) {
@@ -267,6 +268,7 @@ struct SettingsView: View {
 }
 
 private struct ThemeChoiceCard: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let option: AppearancePreference
     let isSelected: Bool
     let action: () -> Void
@@ -297,6 +299,7 @@ private struct ThemeChoiceCard: View {
 }
 
 struct ChoicePill: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let title: String
     let isSelected: Bool
     let action: () -> Void
@@ -314,6 +317,7 @@ struct ChoicePill: View {
 }
 
 private struct ColorSwatch: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let title: String
     let color: Color
     let isSelected: Bool
@@ -339,6 +343,7 @@ private struct ColorSwatch: View {
 }
 
 private struct PaletteChoiceCard: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let option: SidebarColorPreference
     let isSelected: Bool
     let action: () -> Void
@@ -383,6 +388,7 @@ private struct PaletteChoiceCard: View {
 }
 
 private struct BrowserSetupGuideSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var isPresented: Bool
     @State private var copiedBrowser: String?

@@ -14,6 +14,16 @@ struct HidigFocusApp: App {
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
 
     init() {
+        if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--export-icon",
+           let style = AppIconPreference(rawValue: CommandLine.arguments[2]) {
+            do {
+                try AppIconController.exportIconSet(style, to: URL(fileURLWithPath: CommandLine.arguments[3]))
+                exit(0)
+            } catch {
+                fputs("Icon export failed: \(error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
         UserDefaults.standard.register(defaults: [
             HidigSettingsKeys.font: HidigFontPreference.system.rawValue,
             HidigSettingsKeys.appearance: AppearancePreference.system.rawValue,
@@ -29,7 +39,8 @@ struct HidigFocusApp: App {
     var body: some Scene {
         Window("hidigFocus", id: "main") {
             RootView()
-                .id("\(paletteRaw)-\(customPaletteHex)")
+                .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
+                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
@@ -52,7 +63,8 @@ struct HidigFocusApp: App {
 
         MenuBarExtra {
             MenuBarPanel()
-                .id("\(paletteRaw)-\(customPaletteHex)")
+                .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
+                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
@@ -64,7 +76,8 @@ struct HidigFocusApp: App {
 
         Settings {
             SettingsView()
-                .id("\(paletteRaw)-\(customPaletteHex)")
+                .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
+                .transaction { $0.animation = nil }
                 .environmentObject(store)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)

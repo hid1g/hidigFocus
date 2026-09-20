@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.sage.rawValue
@@ -19,6 +20,7 @@ struct RootView: View {
             Group {
                 switch store.selectedSection {
                 case .today: TodayView()
+                case .tasks: TasksView()
                 case .groups: GroupsView()
                 case .habits: HabitsView()
                 case .statistics: StatisticsView()
@@ -57,6 +59,7 @@ struct RootView: View {
 }
 
 private struct Sidebar: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var showsDisableProtection: Bool
     let backgroundColor: Color
@@ -130,6 +133,7 @@ private struct Sidebar: View {
 }
 
 private struct SidebarButton: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     let section: AppSection
     let foregroundColor: Color
@@ -164,6 +168,7 @@ private struct SidebarButton: View {
 }
 
 private struct DisableProtectionSheet: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var isPresented: Bool
     @State private var confirmation = ""
@@ -174,7 +179,7 @@ private struct DisableProtectionSheet: View {
             Text("Отключить защиту?")
                 .hidigFont(size: 28, weight: .bold, design: .rounded)
                 .foregroundStyle(HidigPalette.forest)
-            Text("Группы будут открыты. Текущая серия дисциплины и текущие серии всех привычек станут равны нулю. Сами привычки и история отметок сохранятся.")
+            Text(disableWarning)
                 .foregroundStyle(HidigPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Введите ОТКЛЮЧИТЬ")
@@ -196,5 +201,15 @@ private struct DisableProtectionSheet: View {
         .padding(30)
         .frame(width: 480)
         .background(HidigPalette.canvas)
+    }
+
+    private var disableWarning: String {
+        let streak = RussianPluralizer.phrase(
+            store.disciplineStreak,
+            one: "день",
+            few: "дня",
+            many: "дней"
+        )
+        return "Ваша серия — \(streak) без отключения защиты — будет потеряна. Группы откроются, а текущие серии всех привычек обнулятся. Сами привычки и история отметок сохранятся."
     }
 }

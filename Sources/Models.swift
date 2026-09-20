@@ -3,6 +3,7 @@ import SwiftUI
 
 enum AppSection: String, CaseIterable, Identifiable {
     case today
+    case tasks
     case groups
     case habits
     case statistics
@@ -10,13 +11,14 @@ enum AppSection: String, CaseIterable, Identifiable {
     case journal
     case settings
 
-    static let allCases: [AppSection] = [.groups, .habits, .statistics, .journal, .tickTick, .settings]
+    static let allCases: [AppSection] = [.tasks, .groups, .habits, .statistics, .journal, .tickTick, .settings]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .today: return "Сегодня"
+        case .tasks: return "Задачи"
         case .groups: return "Группы"
         case .habits: return "Привычки"
         case .statistics: return "Статистика"
@@ -29,6 +31,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .today: return "sun.max"
+        case .tasks: return "checklist"
         case .groups: return "shield"
         case .habits: return "checkmark.circle"
         case .statistics: return "chart.bar"
@@ -287,45 +290,190 @@ struct FocusTask: Identifiable, Codable, Equatable, Hashable {
     }
 }
 
+enum HabitPriority: String, Codable, CaseIterable, Identifiable {
+    case normal
+    case important
+    case key
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: return "Обычная"
+        case .important: return "Важная"
+        case .key: return "Ключевая"
+        }
+    }
+
+    var rank: Int {
+        switch self {
+        case .normal: return 0
+        case .important: return 1
+        case .key: return 2
+        }
+    }
+}
+
+enum HabitScheduleKind: String, Codable, CaseIterable, Identifiable {
+    case weekdays
+    case interval
+    case weeklyGoal
+    case monthlyGoal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .weekdays: return "По дням"
+        case .interval: return "Интервал"
+        case .weeklyGoal: return "За неделю"
+        case .monthlyGoal: return "За месяц"
+        }
+    }
+}
+
+struct HabitSchedule: Codable, Equatable {
+    var kind: HabitScheduleKind = .weekdays
+    var weekdays: Set<Int> = Set(1...7)
+    var intervalDays = 1
+    var targetCount = 1
+
+    static let everyDay = HabitSchedule()
+
+    var summary: String {
+        switch kind {
+        case .weekdays:
+            if weekdays == Set(1...7) { return "Каждый день" }
+            if weekdays == Set(2...6) { return "По будням" }
+            if weekdays == Set([1, 7]) { return "По выходным" }
+            let order = [2, 3, 4, 5, 6, 7, 1]
+            let names = [1: "Вс", 2: "Пн", 3: "Вт", 4: "Ср", 5: "Чт", 6: "Пт", 7: "Сб"]
+            return order.filter(weekdays.contains).compactMap { names[$0] }.joined(separator: ", ")
+        case .interval:
+            if intervalDays == 1 { return "Каждый день" }
+            return "Каждые \(RussianPluralizer.phrase(intervalDays, one: "день", few: "дня", many: "дней"))"
+        case .weeklyGoal:
+            return "\(RussianPluralizer.phrase(targetCount, one: "раз", few: "раза", many: "раз")) в неделю"
+        case .monthlyGoal:
+            return "\(RussianPluralizer.phrase(targetCount, one: "раз", few: "раза", many: "раз")) в месяц"
+        }
+    }
+}
+
 struct Habit: Identifiable, Codable, Equatable {
-    var id = UUID()
+    var id: UUID
     var name: String
-    var createdAt = Date()
-    var checkInDayKeys: Set<String> = []
+    var createdAt: Date
+    var checkInDayKeys: Set<String>
     var streakResetDayKey: String?
+    var priority: HabitPriority
+    var schedule: HabitSchedule
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        createdAt: Date = Date(),
+        checkInDayKeys: Set<String> = [],
+        streakResetDayKey: String? = nil,
+        priority: HabitPriority = .normal,
+        schedule: HabitSchedule = .everyDay
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.checkInDayKeys = checkInDayKeys
+        self.streakResetDayKey = streakResetDayKey
+        self.priority = priority
+        self.schedule = schedule
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, checkInDayKeys, streakResetDayKey, priority, schedule
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        checkInDayKeys = try container.decodeIfPresent(Set<String>.self, forKey: .checkInDayKeys) ?? []
+        streakResetDayKey = try container.decodeIfPresent(String.self, forKey: .streakResetDayKey)
+        priority = try container.decodeIfPresent(HabitPriority.self, forKey: .priority) ?? .normal
+        schedule = try container.decodeIfPresent(HabitSchedule.self, forKey: .schedule) ?? .everyDay
+    }
 
     func isChecked(on date: Date, calendar: Calendar = .current) -> Bool {
         checkInDayKeys.contains(DayKey.make(from: date, calendar: calendar))
     }
 
+    func isScheduled(on date: Date, calendar: Calendar = .current) -> Bool {
+        switch schedule.kind {
+        case .weekdays:
+            return schedule.weekdays.contains(calendar.component(.weekday, from: date))
+        case .interval:
+            let start = calendar.startOfDay(for: createdAt)
+            let target = calendar.startOfDay(for: date)
+            guard target >= start else { return false }
+            let days = calendar.dateComponents([.day], from: start, to: target).day ?? 0
+            return days % max(1, min(schedule.intervalDays, 30)) == 0
+        case .weeklyGoal, .monthlyGoal:
+            return true
+        }
+    }
+
+    func isDue(on date: Date, calendar: Calendar = .current) -> Bool {
+        switch schedule.kind {
+        case .weekdays, .interval:
+            return isScheduled(on: date, calendar: calendar)
+        case .weeklyGoal, .monthlyGoal:
+            let value = progress(on: date, calendar: calendar)
+            return isChecked(on: date, calendar: calendar) || value.completed < value.target
+        }
+    }
+
+    func progress(on date: Date = Date(), calendar: Calendar = .current) -> (completed: Int, target: Int) {
+        switch schedule.kind {
+        case .weeklyGoal:
+            return (checkInCount(in: calendar.dateInterval(of: .weekOfYear, for: date), calendar: calendar), max(1, min(schedule.targetCount, 7)))
+        case .monthlyGoal:
+            return (checkInCount(in: calendar.dateInterval(of: .month, for: date), calendar: calendar), max(1, min(schedule.targetCount, 30)))
+        case .weekdays, .interval:
+            return (isChecked(on: date, calendar: calendar) ? 1 : 0, 1)
+        }
+    }
+
+    var progressDescription: String? {
+        switch schedule.kind {
+        case .weeklyGoal, .monthlyGoal:
+            let value = progress()
+            return "\(value.completed)/\(value.target)"
+        case .weekdays, .interval:
+            return nil
+        }
+    }
+
     func currentStreak(referenceDate: Date = Date(), calendar: Calendar = .current) -> Int {
         guard !checkInDayKeys.isEmpty else { return 0 }
-
-        let todayKey = DayKey.make(from: referenceDate, calendar: calendar)
-        var cursor = referenceDate
-        if !checkInDayKeys.contains(todayKey) {
-            cursor = calendar.date(byAdding: .day, value: -1, to: referenceDate) ?? referenceDate
+        switch schedule.kind {
+        case .weekdays, .interval:
+            return occurrenceStreak(referenceDate: referenceDate, calendar: calendar)
+        case .weeklyGoal:
+            return periodStreak(component: .weekOfYear, referenceDate: referenceDate, calendar: calendar)
+        case .monthlyGoal:
+            return periodStreak(component: .month, referenceDate: referenceDate, calendar: calendar)
         }
+    }
 
-        var count = 0
-        while true {
-            let key = DayKey.make(from: cursor, calendar: calendar)
-            if let reset = streakResetDayKey, key < reset { break }
-            guard checkInDayKeys.contains(key) else { break }
-            count += 1
-            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
-            cursor = previous
+    var streakUnit: String {
+        switch schedule.kind {
+        case .weeklyGoal: return "нед."
+        case .monthlyGoal: return "мес."
+        case .weekdays, .interval: return ""
         }
-        return count
     }
 
     mutating func toggleToday(calendar: Calendar = .current) {
-        let key = DayKey.make(from: Date(), calendar: calendar)
-        if checkInDayKeys.contains(key) {
-            checkInDayKeys.remove(key)
-        } else {
-            checkInDayKeys.insert(key)
-        }
+        toggle(on: Date(), calendar: calendar)
     }
 
     mutating func toggle(on date: Date, calendar: Calendar = .current) {
@@ -341,6 +489,64 @@ struct Habit: Identifiable, Codable, Equatable {
         let key = DayKey.make(from: Date(), calendar: calendar)
         streakResetDayKey = key
         checkInDayKeys.remove(key)
+    }
+
+    private func occurrenceStreak(referenceDate: Date, calendar: Calendar) -> Int {
+        var cursor = calendar.startOfDay(for: referenceDate)
+        if isScheduled(on: cursor, calendar: calendar), !isChecked(on: cursor, calendar: calendar) {
+            cursor = calendar.date(byAdding: .day, value: -1, to: cursor) ?? cursor
+        }
+
+        var count = 0
+        for _ in 0..<3_660 {
+            if isScheduled(on: cursor, calendar: calendar) {
+                let key = DayKey.make(from: cursor, calendar: calendar)
+                if let reset = streakResetDayKey, key < reset { break }
+                guard checkInDayKeys.contains(key) else { break }
+                count += 1
+            }
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return count
+    }
+
+    private func periodStreak(component: Calendar.Component, referenceDate: Date, calendar: Calendar) -> Int {
+        guard var interval = calendar.dateInterval(of: component, for: referenceDate) else { return 0 }
+        var count = 0
+        if streakCheckInCount(in: interval, calendar: calendar) >= max(1, schedule.targetCount) {
+            count = 1
+        }
+        guard let previousStart = calendar.date(byAdding: component, value: -1, to: interval.start),
+              let previousInterval = calendar.dateInterval(of: component, for: previousStart) else { return count }
+        interval = previousInterval
+
+        for _ in 0..<520 {
+            if streakCheckInCount(in: interval, calendar: calendar) < max(1, schedule.targetCount) { break }
+            count += 1
+            guard let priorStart = calendar.date(byAdding: component, value: -1, to: interval.start),
+                  let priorInterval = calendar.dateInterval(of: component, for: priorStart) else { break }
+            interval = priorInterval
+        }
+        return count
+    }
+
+    private func checkInCount(in interval: DateInterval?, calendar: Calendar) -> Int {
+        guard let interval else { return 0 }
+        return checkInDayKeys.compactMap { DayKey.date(from: $0, calendar: calendar) }
+            .filter(interval.contains)
+            .count
+    }
+
+    private func streakCheckInCount(in interval: DateInterval, calendar: Calendar) -> Int {
+        checkInDayKeys
+            .filter { key in
+                guard let reset = streakResetDayKey else { return true }
+                return key >= reset
+            }
+            .compactMap { DayKey.date(from: $0, calendar: calendar) }
+            .filter(interval.contains)
+            .count
     }
 }
 
@@ -390,6 +596,7 @@ enum JournalSaveState: Equatable {
 }
 
 struct PersistedAppState: Codable {
+    var schemaVersion = 2
     var protectionEnabled = true
     var groups: [BlockGroup] = [.entertainment]
     var habits: [Habit] = [Habit(name: "Медитация")]
@@ -399,16 +606,27 @@ struct PersistedAppState: Codable {
     var events: [ActivityEvent] = []
     var disciplineStreak = 0
     var disciplineLastCountedDayKey: String?
+    var taskFolders: [TaskFolder] = []
+    var taskLists: [TaskList] = [TaskList.inbox]
+    var managedTasks: [ManagedTask] = []
+    var pomodoroSessions: [PomodoroSession] = []
+    var activePomodoro: ActivePomodoro?
+    var taskSettings = TaskSettings()
+    var taskImportHistory: [TaskImportReport] = []
+    var googleCalendarConnection = GoogleCalendarConnection()
 
     private enum CodingKeys: String, CodingKey {
-        case protectionEnabled, groups, habits, cachedTasks, localTasks, lastSuccessfulSync, events
+        case schemaVersion, protectionEnabled, groups, habits, cachedTasks, localTasks, lastSuccessfulSync, events
         case disciplineStreak, disciplineLastCountedDayKey
+        case taskFolders, taskLists, managedTasks, pomodoroSessions, activePomodoro, taskSettings
+        case taskImportHistory, googleCalendarConnection
     }
 
     init() {}
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         protectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .protectionEnabled) ?? true
         groups = try container.decodeIfPresent([BlockGroup].self, forKey: .groups) ?? [.entertainment]
         habits = try container.decodeIfPresent([Habit].self, forKey: .habits) ?? [Habit(name: "Медитация")]
@@ -418,6 +636,16 @@ struct PersistedAppState: Codable {
         events = try container.decodeIfPresent([ActivityEvent].self, forKey: .events) ?? []
         disciplineStreak = try container.decodeIfPresent(Int.self, forKey: .disciplineStreak) ?? 0
         disciplineLastCountedDayKey = try container.decodeIfPresent(String.self, forKey: .disciplineLastCountedDayKey)
+        taskFolders = try container.decodeIfPresent([TaskFolder].self, forKey: .taskFolders) ?? []
+        taskLists = try container.decodeIfPresent([TaskList].self, forKey: .taskLists) ?? [.inbox]
+        if !taskLists.contains(where: { $0.id == TaskList.inbox.id }) { taskLists.insert(.inbox, at: 0) }
+        managedTasks = try container.decodeIfPresent([ManagedTask].self, forKey: .managedTasks) ?? []
+        pomodoroSessions = try container.decodeIfPresent([PomodoroSession].self, forKey: .pomodoroSessions) ?? []
+        activePomodoro = try container.decodeIfPresent(ActivePomodoro.self, forKey: .activePomodoro)
+        taskSettings = try container.decodeIfPresent(TaskSettings.self, forKey: .taskSettings) ?? TaskSettings()
+        taskImportHistory = try container.decodeIfPresent([TaskImportReport].self, forKey: .taskImportHistory) ?? []
+        googleCalendarConnection = try container.decodeIfPresent(GoogleCalendarConnection.self, forKey: .googleCalendarConnection) ?? GoogleCalendarConnection()
+        schemaVersion = 2
     }
 }
 
@@ -445,6 +673,12 @@ enum DayKey {
     static func make(from date: Date, calendar: Calendar = .current) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    static func date(from key: String, calendar: Calendar = .current) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 }
 
@@ -483,5 +717,24 @@ enum AppError: LocalizedError {
         case .invalidJournalTitle: return "Введите название файла. Символы / и : использовать нельзя."
         case .journalTitleExists: return "Файл с таким названием уже существует."
         }
+    }
+}
+
+// Calendar-day streak: enabling starts at zero; each crossed local day adds one.
+extension PersistedAppState {
+    @discardableResult
+    mutating func advanceProtectionDays(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        let today = DayKey.make(from: now, calendar: calendar)
+        guard protectionEnabled else { return false }
+        guard let key = disciplineLastCountedDayKey,
+              let previous = DayKey.date(from: key, calendar: calendar) else {
+            disciplineLastCountedDayKey = today
+            return true
+        }
+        let elapsed = calendar.dateComponents([.day], from: previous, to: calendar.startOfDay(for: now)).day ?? 0
+        guard elapsed > 0 else { return false }
+        disciplineStreak += elapsed
+        disciplineLastCountedDayKey = today
+        return true
     }
 }

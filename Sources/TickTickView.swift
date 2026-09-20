@@ -1,8 +1,11 @@
 import SwiftUI
 
 struct TickTickView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @State private var copied = false
+    @State private var googleClientID = UserDefaults.standard.string(forKey: "googleOAuthClientID") ?? ""
+    @State private var googleClientSecret = ""
 
     var body: some View {
         ScrollView {
@@ -10,7 +13,7 @@ struct TickTickView: View {
                 PageTitle(
                     eyebrow: "Подключения",
                     title: "Интеграции",
-                    subtitle: "Внешние источники дополняют локальные задачи hidigFocus. Сейчас доступен TickTick."
+                    subtitle: "Внешние календари и источники дополняют локальные задачи hidigFocus."
                 )
 
                 SoftPanel {
@@ -31,6 +34,86 @@ struct TickTickView: View {
                         }
                         Spacer()
                         if store.isSynchronizing { ProgressView() }
+                    }
+                }
+
+                SoftPanel {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionEyebrow(text: "Перенос данных")
+                        Text("Импорт TickTick")
+                            .hidigFont(size: 20, weight: .bold, design: .rounded)
+                        Text("Сначала выполняется предварительный подсчёт. Перед записью создаётся резервная копия локального состояния; повторный импорт пропускает задачи с тем же исходным ID.")
+                            .hidigFont(size: 12)
+                            .foregroundStyle(HidigPalette.secondary)
+                        if let preview = store.tickTickImportPreview {
+                            Text("Найдено: списков — \(preview.lists), активных задач — \(preview.activeTasks), выполненных — \(preview.completedTasks), папок с доступными названиями — \(preview.folders).")
+                                .hidigFont(size: 13, weight: .semibold)
+                            HStack {
+                                Button("Импортировать") { store.performPreparedTickTickImport() }
+                                    .buttonStyle(PrimaryButtonStyle())
+                                Button("Обновить подсчёт") { Task { await store.prepareTickTickImport() } }
+                                    .buttonStyle(SecondaryButtonStyle())
+                            }
+                        } else {
+                            Button("Проверить доступные данные") { Task { await store.prepareTickTickImport() } }
+                                .buttonStyle(PrimaryButtonStyle())
+                                .disabled(store.connectionState != .connected || store.isImportingTickTick)
+                        }
+                        if let report = store.state.taskImportHistory.first {
+                            Text("Последний импорт: перенесено — \(report.imported), пропущено — \(report.skipped), ошибок — \(report.failed).")
+                                .hidigFont(size: 11)
+                                .foregroundStyle(HidigPalette.secondary)
+                        }
+                        Text("Текущий CLI возвращает ID папки у списка, но не название папки. Поэтому папки не создаются с выдуманными названиями; для точной иерархии нужна резервная выгрузка TickTick.")
+                            .hidigFont(size: 11)
+                            .foregroundStyle(HidigPalette.warning)
+                    }
+                }
+
+                SoftPanel {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            StatusDot(isActive: store.state.googleCalendarConnection.isConnected)
+                            Text("Google Calendar")
+                                .hidigFont(size: 20, weight: .bold, design: .rounded)
+                            Spacer()
+                            if store.isGoogleSynchronizing { ProgressView() }
+                        }
+                        if store.state.googleCalendarConnection.isConnected {
+                            Text(googleLastSyncText)
+                                .hidigFont(size: 12)
+                                .foregroundStyle(HidigPalette.secondary)
+                            ForEach(store.googleCalendars) { calendar in
+                                Toggle(isOn: Binding(
+                                    get: { store.state.googleCalendarConnection.selectedCalendarIDs.contains(calendar.id) },
+                                    set: { store.setGoogleCalendarSelected(calendar.id, selected: $0) }
+                                )) {
+                                    Text(calendar.summary)
+                                }
+                            }
+                            HStack {
+                                Button("Синхронизировать") { Task { await store.refreshGoogleCalendars() } }
+                                    .buttonStyle(PrimaryButtonStyle())
+                                Button("Отключить") { store.disconnectGoogleCalendar() }
+                                    .buttonStyle(DestructiveButtonStyle())
+                            }
+                        } else {
+                            Text("OAuth выполняется через Google. Токены и Client Secret сохраняются только в Keychain.")
+                                .hidigFont(size: 12)
+                                .foregroundStyle(HidigPalette.secondary)
+                            TextField("Google OAuth Client ID", text: $googleClientID)
+                                .textFieldStyle(HidigTextFieldStyle())
+                            SecureField("Client Secret, если выдан для desktop-клиента", text: $googleClientSecret)
+                                .textFieldStyle(HidigTextFieldStyle())
+                            Button("Подключить Google Calendar") {
+                                Task { await store.connectGoogleCalendar(clientID: googleClientID, clientSecret: googleClientSecret.isEmpty ? nil : googleClientSecret) }
+                            }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .disabled(googleClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        if let error = store.state.googleCalendarConnection.lastSyncError {
+                            Text(error).hidigFont(size: 11).foregroundStyle(HidigPalette.warning)
+                        }
                     }
                 }
 
@@ -146,5 +229,12 @@ struct TickTickView: View {
             return "Последняя успешная синхронизация: \(date.formatted(date: .abbreviated, time: .shortened)). Получено задач: \(store.todayTasks.count)."
         }
         return "Аккаунт подключён. Запустите первую синхронизацию."
+    }
+
+    private var googleLastSyncText: String {
+        if let date = store.state.googleCalendarConnection.lastSuccessfulSync {
+            return "Последняя успешная синхронизация: \(date.formatted(date: .abbreviated, time: .shortened))."
+        }
+        return "Аккаунт подключён. Выберите календари и запустите синхронизацию."
     }
 }
