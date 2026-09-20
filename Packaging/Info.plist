@@ -8,6 +8,8 @@
     <string>hidigFocus</string>
     <key>CFBundleExecutable</key>
     <string>hidigFocus</string>
+    <key>NSDockTilePlugIn</key>
+    <string>HidigDockTilePlugin.docktileplugin</string>
     <key>CFBundleIconFile</key>
     <string>hidigFocus</string>
     <key>CFBundleIdentifier</key>

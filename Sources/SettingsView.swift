@@ -136,6 +136,10 @@ struct SettingsView: View {
                 }
             }
 
+            Text("Если после обновления иконка меняется при выходе: удалите только значок hidigFocus из Dock и закрепите его заново. Само приложение удалять не нужно.")
+                .hidigFont(size: 11)
+                .foregroundStyle(HidigPalette.secondary)
+
             Button("Вернуть стандартное оформление", action: resetAppearance)
                 .buttonStyle(GhostButtonStyle())
         }

@@ -332,6 +332,12 @@ enum AppIconController {
         if let image = renderer.nsImage {
             NSApplication.shared.applicationIconImage = image
             appliedStyle = style
+            UserDefaults.standard.set(style.rawValue, forKey: HidigSettingsKeys.appIcon)
+            UserDefaults.standard.synchronize()
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name("com.hidig.focus.iconChanged"), object: nil,
+                userInfo: nil, deliverImmediately: true
+            )
             let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
             imageView.image = image
             imageView.imageScaling = .scaleProportionallyUpOrDown
