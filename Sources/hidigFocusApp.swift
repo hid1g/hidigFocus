@@ -8,7 +8,7 @@ struct HidigFocusApp: App {
     @AppStorage(HidigSettingsKeys.font) private var fontRaw = HidigFontPreference.system.rawValue
     @AppStorage(HidigSettingsKeys.textSize) private var textSizeRaw = HidigTextSizePreference.standard.rawValue
     @AppStorage(HidigSettingsKeys.appIcon) private var appIconRaw = AppIconPreference.green.rawValue
-    @AppStorage(HidigSettingsKeys.sidebarColor) private var paletteRaw = SidebarColorPreference.sage.rawValue
+    @AppStorage(HidigSettingsKeys.sidebarColor) private var paletteRaw = SidebarColorPreference.ocean.rawValue
     @AppStorage(HidigSettingsKeys.customSidebarColor) private var customPaletteHex = "#E5EFDA"
     @AppStorage(HidigSettingsKeys.showDockIcon) private var showDockIcon = true
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
@@ -28,12 +28,14 @@ struct HidigFocusApp: App {
             HidigSettingsKeys.font: HidigFontPreference.system.rawValue,
             HidigSettingsKeys.appearance: AppearancePreference.system.rawValue,
             HidigSettingsKeys.textSize: HidigTextSizePreference.standard.rawValue,
-            HidigSettingsKeys.sidebarColor: SidebarColorPreference.sage.rawValue,
+            HidigSettingsKeys.sidebarColor: SidebarColorPreference.ocean.rawValue,
             HidigSettingsKeys.customSidebarColor: "#E5EFDA",
             HidigSettingsKeys.appIcon: AppIconPreference.green.rawValue,
             HidigSettingsKeys.showDockIcon: true,
             HidigSettingsKeys.openWindowOnLaunch: true
         ])
+        // The current release intentionally exposes Nord as the single base palette.
+        UserDefaults.standard.set(SidebarColorPreference.ocean.rawValue, forKey: HidigSettingsKeys.sidebarColor)
     }
 
     var body: some Scene {
@@ -67,7 +69,7 @@ struct HidigFocusApp: App {
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
         } label: {
-            Image(systemName: "leaf.fill")
+            Image(systemName: "scope")
                 .accessibilityLabel("hidigFocus")
         }
         .menuBarExtraStyle(.window)

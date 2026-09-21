@@ -7,17 +7,17 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(AppSection.allCases.dropFirst().first, .groups)
     }
 
-    func testEveryPaletteHasDistinctLightAndDarkColors() {
+    func testOnlyNordPaletteIsCurrentlyExposed() {
         let palettes = SidebarColorPreference.allCases
-        let lightCanvases = Set(palettes.map { $0.theme(isDark: false).canvas })
-        let darkCanvases = Set(palettes.map { $0.theme(isDark: true).canvas })
+        XCTAssertEqual(palettes, [.ocean])
+        XCTAssertNotEqual(SidebarColorPreference.ocean.theme(isDark: false).canvas,
+                          SidebarColorPreference.ocean.theme(isDark: true).canvas)
+    }
 
-        XCTAssertEqual(lightCanvases.count, palettes.count)
-        XCTAssertEqual(darkCanvases.count, palettes.count)
-        for palette in palettes {
-            XCTAssertNotEqual(palette.theme(isDark: false).canvas, palette.theme(isDark: true).canvas)
-            XCTAssertNotEqual(palette.theme(isDark: false).text, palette.theme(isDark: true).text)
-        }
+    func testCalendarZoomClampsToUsableRange() {
+        XCTAssertEqual(CalendarZoom.clamp(20), 44)
+        XCTAssertEqual(CalendarZoom.clamp(72), 72)
+        XCTAssertEqual(CalendarZoom.clamp(180), 120)
     }
 
     func testKnownServiceAliasesAreBlockedTogether() {

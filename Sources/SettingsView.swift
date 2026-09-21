@@ -7,7 +7,7 @@ struct SettingsView: View {
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage(HidigSettingsKeys.font) private var fontRaw = HidigFontPreference.system.rawValue
     @AppStorage(HidigSettingsKeys.textSize) private var textSizeRaw = HidigTextSizePreference.standard.rawValue
-    @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.sage.rawValue
+    @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.ocean.rawValue
     @AppStorage(HidigSettingsKeys.customSidebarColor) private var customSidebarColorHex = "#E5EFDA"
     @AppStorage(HidigSettingsKeys.appIcon) private var appIconRaw = AppIconPreference.green.rawValue
     @AppStorage(HidigSettingsKeys.showDockIcon) private var showDockIcon = true
@@ -71,7 +71,7 @@ struct SettingsView: View {
     }
 
     private var appearanceSection: some View {
-        settingsSection("Оформление", description: "Каждая палитра работает в светлом, тёмном и системном режиме. Настройка применяется ко всему интерфейсу.") {
+        settingsSection("Оформление", description: "Nord используется как базовая палитра. Светлый, тёмный и системный режимы остаются доступны.") {
             settingLabel("Тема")
             HStack(spacing: 10) {
                 ForEach(AppearancePreference.allCases) { option in
@@ -109,7 +109,7 @@ struct SettingsView: View {
             }
 
             Divider().overlay(HidigPalette.line).padding(.vertical, 3)
-            settingLabel("Палитра")
+            settingLabel("Базовая палитра")
             LazyVGrid(columns: threeColumns, spacing: 9) {
                 ForEach(SidebarColorPreference.allCases) { option in
                     PaletteChoiceCard(option: option, isSelected: sidebarColorRaw == option.rawValue) {
@@ -136,7 +136,7 @@ struct SettingsView: View {
                 }
             }
 
-            Text("Если после обновления иконка меняется при выходе: удалите только значок hidigFocus из Dock и закрепите его заново. Само приложение удалять не нужно.")
+            Text("Во всех вариантах сохранён исходный знак hidigFocus без листьев; нижняя форма перенесена в центр. Если Dock показывает старую версию, удалите только значок hidigFocus из Dock и закрепите его заново.")
                 .hidigFont(size: 11)
                 .foregroundStyle(HidigPalette.secondary)
 
@@ -249,7 +249,7 @@ struct SettingsView: View {
         appearanceRaw = AppearancePreference.system.rawValue
         fontRaw = HidigFontPreference.system.rawValue
         textSizeRaw = HidigTextSizePreference.standard.rawValue
-        sidebarColorRaw = SidebarColorPreference.sage.rawValue
+        sidebarColorRaw = SidebarColorPreference.ocean.rawValue
         customSidebarColorHex = "#E5EFDA"
         appIconRaw = AppIconPreference.green.rawValue
 
@@ -257,7 +257,7 @@ struct SettingsView: View {
         defaults.set(AppearancePreference.system.rawValue, forKey: HidigSettingsKeys.appearance)
         defaults.set(HidigFontPreference.system.rawValue, forKey: HidigSettingsKeys.font)
         defaults.set(HidigTextSizePreference.standard.rawValue, forKey: HidigSettingsKeys.textSize)
-        defaults.set(SidebarColorPreference.sage.rawValue, forKey: HidigSettingsKeys.sidebarColor)
+        defaults.set(SidebarColorPreference.ocean.rawValue, forKey: HidigSettingsKeys.sidebarColor)
         defaults.set("#E5EFDA", forKey: HidigSettingsKeys.customSidebarColor)
         defaults.set(AppIconPreference.green.rawValue, forKey: HidigSettingsKeys.appIcon)
 

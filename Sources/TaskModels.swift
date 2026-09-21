@@ -13,6 +13,13 @@ enum TasksPresentation: String, CaseIterable, Identifiable {
         case .matrix: return "Матрица"
         }
     }
+    var systemImage: String {
+        switch self {
+        case .list: return "list.bullet"
+        case .calendar: return "calendar"
+        case .matrix: return "square.grid.2x2"
+        }
+    }
 }
 
 enum TaskCalendarMode: String, CaseIterable, Identifiable {
@@ -31,6 +38,22 @@ enum TaskCalendarMode: String, CaseIterable, Identifiable {
         case .month: return "Месяц"
         case .agenda: return "Повестка"
         }
+    }
+    var systemImage: String {
+        switch self {
+        case .day: return "rectangle"
+        case .fourDays: return "rectangle.split.3x1"
+        case .week: return "calendar"
+        case .month: return "square.grid.3x3"
+        case .agenda: return "list.bullet.rectangle"
+        }
+    }
+}
+
+enum CalendarZoom {
+    static let bounds = 44.0...120.0
+    static func clamp(_ value: Double) -> Double {
+        min(bounds.upperBound, max(bounds.lowerBound, value))
     }
 }
 

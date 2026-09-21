@@ -20,7 +20,7 @@ enum HidigPalette {
 
     private static func themed(_ keyPath: KeyPath<HidigThemeColors, String>) -> Color {
         let preference = UserDefaults.standard.string(forKey: HidigSettingsKeys.sidebarColor)
-            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .sage
+            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .ocean
         return Color(nsColor: NSColor(name: NSColor.Name("\(preference.rawValue)-\(keyPath)")) { appearance in
             let colors = preference.theme(isDark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
             return NSColor(hex: colors[keyPath: keyPath])

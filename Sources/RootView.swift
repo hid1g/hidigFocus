@@ -4,11 +4,15 @@ struct RootView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
-    @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.sage.rawValue
+    @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.ocean.rawValue
     @AppStorage(HidigSettingsKeys.customSidebarColor) private var customSidebarColorHex = "#E5EFDA"
     @State private var showsDisableProtection = false
     @AppStorage("navigationCollapsed") private var navigationCollapsed = true
-    @AppStorage("navigationWidth") private var navigationWidth = 206.0
+    @AppStorage("navigationWidth") private var navigationWidth = 240.0
+
+    private var resolvedNavigationWidth: Double {
+        min(320, max(224, navigationWidth))
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -18,9 +22,9 @@ struct RootView: View {
                 backgroundColor: HidigPalette.sidebar,
                 foregroundColor: HidigPalette.forest
             )
-                .frame(width: navigationCollapsed ? 64 : navigationWidth)
+                .frame(width: navigationCollapsed ? 64 : resolvedNavigationWidth)
             if !navigationCollapsed {
-                PanelResizeHandle(width: $navigationWidth, bounds: 180...280)
+                PanelResizeHandle(width: $navigationWidth, bounds: 224...320)
             }
 
             Group {
@@ -35,6 +39,9 @@ struct RootView: View {
                 case .settings: SettingsView()
                 }
             }
+            .id(store.selectedSection)
+            .transition(.opacity.combined(with: .scale(scale: 0.995)))
+            .animation(.easeInOut(duration: 0.22), value: store.selectedSection)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(HidigPalette.canvas)
         }
@@ -60,6 +67,9 @@ struct RootView: View {
         .onChange(of: appearanceRaw) { value in
             AppAppearanceController.apply(AppearancePreference(rawValue: value) ?? .system)
         }
+        .onAppear {
+            navigationWidth = resolvedNavigationWidth
+        }
     }
 
 }
@@ -75,33 +85,33 @@ private struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
-                Image(systemName: "leaf.fill")
-                    .hidigFont(size: 19, weight: .semibold)
-                    .foregroundStyle(foregroundColor)
-                    .frame(width: 38, height: 38)
-                    .background(Color.white.opacity(0.22))
-                    .clipShape(RoundedRectangle(cornerRadius: 11))
+                ZStack(alignment: .bottomTrailing) {
+                    AppIconPreview(style: .green, size: 38)
+                    if isCollapsed {
+                        collapseButton
+                            .offset(x: 5, y: 5)
+                    }
+                }
                 if !isCollapsed { VStack(alignment: .leading, spacing: 1) {
                     Text("hidigFocus")
                         .hidigFont(size: 17, weight: .semibold, design: .rounded)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .fixedSize(horizontal: true, vertical: false)
                     Text("focus gate")
                         .hidigFont(size: 10, weight: .medium, design: .rounded)
                         .tracking(1)
                         .foregroundStyle(foregroundColor.opacity(0.68))
-                } }
+                }
+                .layoutPriority(1)
+                }
+                if !isCollapsed {
+                    Spacer(minLength: 4)
+                    collapseButton
+                }
             }
             .padding(.top, 48)
             .padding(.horizontal, isCollapsed ? 13 : 20)
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { isCollapsed.toggle() }
-            } label: {
-                Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.leading")
-                    .frame(maxWidth: .infinity, minHeight: 30)
-            }.buttonStyle(.plain)
-                .help(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
-                .accessibilityLabel(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
-                .padding(.top, 12)
 
             VStack(spacing: 5) {
                 ForEach(AppSection.allCases) { section in
@@ -109,7 +119,7 @@ private struct Sidebar: View {
                 }
             }
             .padding(.horizontal, isCollapsed ? 8 : 12)
-            .padding(.top, 12)
+            .padding(.top, 22)
 
             Spacer()
 
@@ -157,6 +167,23 @@ private struct Sidebar: View {
         .overlay(alignment: .trailing) {
             Rectangle().fill(HidigPalette.line).frame(width: 1)
         }
+        .animation(.easeInOut(duration: 0.24), value: isCollapsed)
+    }
+
+    private var collapseButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.24)) { isCollapsed.toggle() }
+        } label: {
+            Image(systemName: isCollapsed ? "sidebar.right" : "sidebar.left")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 26, height: 26)
+                .background(backgroundColor.opacity(0.92))
+                .overlay(Circle().stroke(foregroundColor.opacity(0.22)))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
+        .accessibilityLabel(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
     }
 }
 
@@ -170,11 +197,16 @@ private struct SidebarButton: View {
 
     var body: some View {
         Button {
-            store.selectedSection = section
+            withAnimation(.easeInOut(duration: 0.22)) { store.selectedSection = section }
         } label: {
             HStack(spacing: 11) {
                 Image(systemName: section.systemImage).frame(width: 18)
-                if !isCollapsed { Text(section.title); Spacer() }
+                if !isCollapsed {
+                    Text(section.title)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
+                    Spacer()
+                }
             }
             .contentShape(Rectangle())
             .hidigFont(size: 13, weight: store.selectedSection == section ? .semibold : .regular)
@@ -189,6 +221,8 @@ private struct SidebarButton: View {
         .accessibilityLabel(section.title)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.16), value: isHovered)
+        .animation(.easeInOut(duration: 0.2), value: store.selectedSection)
     }
 
     private var background: Color {

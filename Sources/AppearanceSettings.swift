@@ -135,7 +135,9 @@ enum SidebarColorPreference: String, CaseIterable, Identifiable {
     case rose
     case ocean
 
-    static let allCases: [SidebarColorPreference] = [.sage, .graphite, .ocean, .cream, .lavender, .rose]
+    // Other palettes remain decodable for existing settings, but Nord is the only
+    // user-facing palette until the replacement theme set is ready.
+    static let allCases: [SidebarColorPreference] = [.ocean]
 
     var id: String { rawValue }
 
@@ -220,41 +222,45 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
         switch self {
         case .light: return "Светлая"
         case .green: return "Оригинал"
-        case .dark: return "Графитовая"
+        case .dark: return "Графит"
         case .purple: return "Фиолетовая"
         case .aurora: return "Аврора"
         case .blue: return "Синяя"
         case .amber: return "Янтарная"
-        case .rose: return "Розовая"
+        case .rose: return "Ночная"
         }
     }
 
-    var hueRotation: Angle {
+    var ornament: AppIconOrnament {
         switch self {
-        case .light, .green, .dark: return .zero
-        case .purple: return .degrees(78)
-        case .aurora: return .degrees(318)
-        case .rose: return .degrees(220)
-        case .blue: return .degrees(145)
-        case .amber: return .degrees(280)
+        case .green: return .plain
+        case .light: return .ring
+        case .dark: return .frame
+        case .purple: return .halo
+        case .aurora: return .rays
+        case .blue: return .grid
+        case .amber: return .sun
+        case .rose: return .moon
         }
     }
 
-    var saturation: Double {
+    var colors: [Color] {
         switch self {
-        case .light: return 0.52
-        case .green: return 1
-        case .dark: return 0
-        case .purple, .rose, .blue, .amber: return 0.9
-        case .aurora: return 1.18
+        case .light: return [Color(hex: "#F7F9FC"), Color(hex: "#DCE5F0")]
+        case .green: return [Color(hex: "#5E81AC"), Color(hex: "#88C0D0")]
+        case .dark: return [Color(hex: "#202630"), Color(hex: "#3B4352")]
+        case .purple: return [Color(hex: "#5E4B8B"), Color(hex: "#B48ECA")]
+        case .aurora: return [Color(hex: "#2A9D8F"), Color(hex: "#66D1B2")]
+        case .blue: return [Color(hex: "#345995"), Color(hex: "#6FA8DC")]
+        case .amber: return [Color(hex: "#D9822B"), Color(hex: "#F6C85F")]
+        case .rose: return [Color(hex: "#763B5D"), Color(hex: "#D889A4")]
         }
     }
 
-    var brightness: Double {
+    var markColor: Color {
         switch self {
-        case .light: return 0.12
-        case .green, .purple, .aurora, .rose, .blue, .amber: return 0
-        case .dark: return -0.12
+        case .light: return Color(hex: "#2E3440")
+        default: return .white
         }
     }
 
@@ -263,22 +269,95 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppIconOrnament {
+    case plain, ring, frame, halo, rays, grid, sun, moon
+}
+
 struct AppIconPreview: View {
     let style: AppIconPreference
     var size: CGFloat = 48
 
     var body: some View {
-        let resolved = style.normalized
+        let tileSize = size * 0.82
         ZStack {
-            Image(nsImage: AppIconController.originalIcon)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .hueRotation(resolved.hueRotation)
-                .saturation(resolved.saturation)
-                .brightness(resolved.brightness)
-                .contrast(resolved == .dark ? 1.18 : 1)
+            ZStack {
+                RoundedRectangle(cornerRadius: tileSize * 0.225, style: .continuous)
+                    .fill(LinearGradient(colors: style.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: tileSize * 0.225, style: .continuous)
+                    .stroke(Color.white.opacity(style == .light ? 0.72 : 0.2), lineWidth: max(1, tileSize * 0.018))
+                AppIconOrnamentView(style: style, size: tileSize)
+                HidigGateMark(color: style.markColor)
+                    .frame(width: tileSize * 0.54, height: tileSize * 0.54)
+            }
+            .frame(width: tileSize, height: tileSize)
+            .shadow(color: Color.black.opacity(0.13), radius: tileSize * 0.035, y: tileSize * 0.025)
         }
         .frame(width: size, height: size)
+    }
+}
+
+private struct HidigGateMark: View {
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            ZStack {
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.10, y: height * 0.16))
+                    path.addLine(to: CGPoint(x: width * 0.47, y: height * 0.32))
+                    path.addLine(to: CGPoint(x: width * 0.47, y: height * 0.88))
+                    path.addLine(to: CGPoint(x: width * 0.18, y: height * 0.74))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.10, y: height * 0.60), control: CGPoint(x: width * 0.10, y: height * 0.70))
+                    path.closeSubpath()
+                }
+                .fill(color)
+
+                Path { path in
+                    path.move(to: CGPoint(x: width * 0.90, y: height * 0.16))
+                    path.addLine(to: CGPoint(x: width * 0.53, y: height * 0.32))
+                    path.addLine(to: CGPoint(x: width * 0.53, y: height * 0.88))
+                    path.addLine(to: CGPoint(x: width * 0.82, y: height * 0.74))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.90, y: height * 0.60), control: CGPoint(x: width * 0.90, y: height * 0.70))
+                    path.closeSubpath()
+                }
+                .fill(color)
+
+                Capsule().fill(color.opacity(0.42))
+                    .frame(width: width * 0.055, height: height * 0.22)
+                    .offset(x: -width * 0.14, y: height * 0.16)
+                Capsule().fill(color.opacity(0.42))
+                    .frame(width: width * 0.055, height: height * 0.22)
+                    .offset(x: width * 0.14, y: height * 0.16)
+            }
+        }
+    }
+}
+
+private struct AppIconOrnamentView: View {
+    let style: AppIconPreference
+    let size: CGFloat
+
+    @ViewBuilder var body: some View {
+        switch style.ornament {
+        case .plain:
+            Circle().fill(Color.black.opacity(0.10)).frame(width: size * 0.68, height: size * 0.68)
+        case .ring:
+            Circle().stroke(style.markColor.opacity(0.22), lineWidth: size * 0.035).frame(width: size * 0.72, height: size * 0.72)
+        case .frame:
+            RoundedRectangle(cornerRadius: size * 0.13).stroke(Color.white.opacity(0.18), lineWidth: size * 0.025).frame(width: size * 0.72, height: size * 0.72)
+        case .halo:
+            Circle().fill(Color.white.opacity(0.12)).frame(width: size * 0.74, height: size * 0.74).blur(radius: size * 0.045)
+        case .rays:
+            Circle().stroke(Color.white.opacity(0.24), style: StrokeStyle(lineWidth: size * 0.02, dash: [size * 0.06, size * 0.045])).frame(width: size * 0.78, height: size * 0.78)
+        case .grid:
+            RoundedRectangle(cornerRadius: size * 0.08).fill(Color.white.opacity(0.10)).frame(width: size * 0.76, height: size * 0.76)
+        case .sun:
+            Circle().fill(Color.white.opacity(0.15)).frame(width: size * 0.74, height: size * 0.74)
+        case .moon:
+            Circle().stroke(Color.white.opacity(0.18), lineWidth: size * 0.03).frame(width: size * 0.74, height: size * 0.74).offset(x: size * 0.04)
+        }
     }
 }
 
@@ -443,7 +522,7 @@ enum SidebarColorResolver {
 
     static func currentTheme(for appearance: NSAppearance) -> HidigThemeColors {
         let preference = UserDefaults.standard.string(forKey: HidigSettingsKeys.sidebarColor)
-            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .sage
+            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .ocean
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return preference.theme(isDark: isDark)
     }

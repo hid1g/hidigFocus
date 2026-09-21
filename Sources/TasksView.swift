@@ -27,7 +27,7 @@ struct TasksView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) { taskListsVisible.toggle() }
             } label: { Image(systemName: "sidebar.left") }
@@ -40,14 +40,9 @@ struct TasksView: View {
             Spacer()
             TextField("Поиск", text: $searchText)
                 .textFieldStyle(HidigTextFieldStyle())
-                .frame(minWidth: 100, maxWidth: 190)
+                .frame(minWidth: 90, maxWidth: 150)
             SyncButton(showTitle: false)
-            Picker("Представление", selection: $store.tasksPresentation) {
-                ForEach(TasksPresentation.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 230)
+            TasksPresentationControl(selection: $store.tasksPresentation)
         }
         .padding(.horizontal, 22)
         .padding(.top, 30)
@@ -57,16 +52,48 @@ struct TasksView: View {
 
     @ViewBuilder
     private var center: some View {
-        switch store.tasksPresentation {
-        case .list:
-            TaskListColumn(searchText: searchText, quickTaskTitle: $quickTaskTitle)
-        case .calendar:
-            TaskCalendarView(searchText: searchText)
-        case .matrix:
-            EisenhowerMatrixView()
+        Group {
+            switch store.tasksPresentation {
+            case .list:
+                TaskListColumn(searchText: searchText, quickTaskTitle: $quickTaskTitle)
+            case .calendar:
+                TaskCalendarView(searchText: searchText)
+            case .matrix:
+                EisenhowerMatrixView()
+            }
         }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .animation(.easeInOut(duration: 0.22), value: store.tasksPresentation)
     }
 
+}
+
+private struct TasksPresentationControl: View {
+    @Binding var selection: TasksPresentation
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(TasksPresentation.allCases) { option in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { selection = option }
+                } label: {
+                    Label(option.title, systemImage: option.systemImage)
+                        .hidigFont(size: 10, weight: selection == option ? .semibold : .medium)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.86)
+                        .padding(.horizontal, 7)
+                        .frame(height: 32)
+                        .background(selection == option ? HidigPalette.surfaceRaised : .clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(HidigPalette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 11))
+    }
 }
 
 private struct TaskNavigationColumn: View {
@@ -337,6 +364,8 @@ private struct TaskCalendarView: View {
     @EnvironmentObject private var store: AppStore
     let searchText: String
     @AppStorage("calendarUnscheduledVisible") private var showsUnscheduled = false
+    @AppStorage("calendarHourHeight") private var hourHeight = 72.0
+    @State private var magnificationStart: Double?
     private let calendar = Calendar.current
 
     var body: some View {
@@ -350,13 +379,25 @@ private struct TaskCalendarView: View {
                     if let id = store.addManagedTask(named: "Новая задача") {
                         store.scheduleManagedTask(id, at: Calendar.current.startOfDay(for: store.taskCalendarAnchor), allDay: true)
                     }
-                } label: { Image(systemName: "plus") }.help("Новая задача")
-                Picker("Режим", selection: $store.taskCalendarMode) {
-                    ForEach(TaskCalendarMode.allCases) { Text($0.title).tag($0) }
-                }.labelsHidden().frame(width: 110)
-                Button { movePeriod(-1) } label: { Image(systemName: "chevron.left") }
-                Button("Сегодня") { store.taskCalendarAnchor = Date() }
-                Button { movePeriod(1) } label: { Image(systemName: "chevron.right") }
+                } label: { Image(systemName: "plus") }
+                    .buttonStyle(HidigIconButtonStyle()).help("Новая задача")
+                calendarModeMenu
+                HStack(spacing: 0) {
+                    Button { movePeriod(-1) } label: { Image(systemName: "chevron.left") }
+                    Divider().frame(height: 20)
+                    Button("Сегодня") {
+                        withAnimation(.easeInOut(duration: 0.22)) { store.taskCalendarAnchor = Date() }
+                    }.frame(minWidth: 70)
+                    Divider().frame(height: 20)
+                    Button { movePeriod(1) } label: { Image(systemName: "chevron.right") }
+                }
+                .buttonStyle(.plain)
+                .frame(height: 32)
+                .padding(.horizontal, 6)
+                .background(HidigPalette.surface)
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                zoomControl
             }.padding(12)
             HStack(spacing: 0) {
                 if showsUnscheduled {
@@ -377,6 +418,46 @@ private struct TaskCalendarView: View {
                 calendarBody
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: showsUnscheduled)
+        .animation(.easeInOut(duration: 0.22), value: store.taskCalendarMode)
+    }
+
+    private var calendarModeMenu: some View {
+        Menu {
+            ForEach(TaskCalendarMode.allCases) { option in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { store.taskCalendarMode = option }
+                } label: {
+                    Label(option.title, systemImage: store.taskCalendarMode == option ? "checkmark" : option.systemImage)
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: store.taskCalendarMode.systemImage)
+                Text(store.taskCalendarMode.title)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .hidigFont(size: 11, weight: .semibold)
+            .padding(.horizontal, 11)
+            .frame(height: 32)
+            .background(HidigPalette.surface)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var zoomControl: some View {
+        HStack(spacing: 2) {
+            Button { adjustZoom(-8) } label: { Image(systemName: "minus") }
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(HidigPalette.secondary)
+                .help("Масштаб сетки: сведите или разведите два пальца")
+            Button { adjustZoom(8) } label: { Image(systemName: "plus") }
+        }
+        .buttonStyle(HidigIconButtonStyle())
     }
 
     private func matches(_ task: ManagedTask) -> Bool {
@@ -429,14 +510,23 @@ private struct TaskCalendarView: View {
                                         ForEach(0..<24, id: \.self) { hour in
                                             Text(String(format: "%02d:00", hour)).font(.system(size: 10))
                                                 .foregroundStyle(HidigPalette.secondary)
-                                                .frame(width: 48, height: 64, alignment: .top).id(hour)
+                                                .frame(width: 48, height: CGFloat(hourHeight), alignment: .top).id(hour)
                                         }
                                     }
                                     ForEach(days, id: \.self) { day in
-                                        DayTimelineColumn(day: day, width: width, searchText: searchText)
+                                        DayTimelineColumn(day: day, width: width, searchText: searchText, hourHeight: CGFloat(hourHeight))
                                     }
                                 }
-                            }.onAppear { reader.scrollTo(8, anchor: .top) }
+                            }
+                            .simultaneousGesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        if magnificationStart == nil { magnificationStart = hourHeight }
+                                        hourHeight = CalendarZoom.clamp((magnificationStart ?? hourHeight) * Double(value))
+                                    }
+                                    .onEnded { _ in magnificationStart = nil }
+                            )
+                            .onAppear { reader.scrollTo(8, anchor: .top) }
                         }
                     }.frame(width: 48 + width * CGFloat(count))
                 }
@@ -446,8 +536,14 @@ private struct TaskCalendarView: View {
 
     private func movePeriod(_ direction: Int) {
         let count = store.taskCalendarMode == .fourDays ? 4 : (store.taskCalendarMode == .week ? 7 : 1)
-        store.taskCalendarAnchor = calendar.date(byAdding: store.taskCalendarMode == .month ? .month : .day,
-            value: direction * count, to: store.taskCalendarAnchor) ?? store.taskCalendarAnchor
+        withAnimation(.easeInOut(duration: 0.22)) {
+            store.taskCalendarAnchor = calendar.date(byAdding: store.taskCalendarMode == .month ? .month : .day,
+                value: direction * count, to: store.taskCalendarAnchor) ?? store.taskCalendarAnchor
+        }
+    }
+
+    private func adjustZoom(_ delta: Double) {
+        withAnimation(.easeInOut(duration: 0.18)) { hourHeight = CalendarZoom.clamp(hourHeight + delta) }
     }
 }
 
@@ -475,7 +571,7 @@ private struct DayTimelineColumn: View {
     let day: Date
     let width: CGFloat
     let searchText: String
-    private let hourHeight: CGFloat = 64
+    let hourHeight: CGFloat
     private var dayEnd: Date { Calendar.current.date(byAdding: .day, value: 1, to: day)! }
     private var tasks: [ManagedTask] {
         store.calendarTasks(on: day).filter {
@@ -520,7 +616,7 @@ private struct DayTimelineColumn: View {
                 let laneWidth = (width - 4) / CGFloat(placement.laneCount)
                 Text(event.title).font(.system(size: 11)).padding(4)
                     .frame(width: laneWidth - 3, height: max(22, CGFloat(minute(event.endDate) - minute(event.startDate)) / 60 * hourHeight), alignment: .topLeading)
-                    .background(HidigPalette.lettuce).clipShape(RoundedRectangle(cornerRadius: 4))
+                        .background(HidigPalette.lettuce.opacity(0.72)).clipShape(RoundedRectangle(cornerRadius: 7))
                     .offset(x: 2 + CGFloat(placement.lane) * laneWidth, y: CGFloat(minute(event.startDate)) / 60 * hourHeight)
             }
             if Calendar.current.isDateInToday(day) {
@@ -528,7 +624,7 @@ private struct DayTimelineColumn: View {
                     .offset(y: CGFloat(minute(Date())) / 60 * hourHeight).allowsHitTesting(false)
             }
         }.frame(width: width, height: hourHeight * 24)
-            .overlay(alignment: .trailing) { Divider() }
+            .overlay(alignment: .trailing) { Divider().opacity(0.7) }
             .contentShape(Rectangle())
             .dropDestination(for: String.self) { values, location in
                 guard let id = values.first.flatMap(UUID.init(uuidString:)) else { return false }
@@ -571,9 +667,11 @@ private struct CalendarTaskBlock: View {
                         resizeDelta = 0
                     })
         }.frame(width: width, height: max(22, height + resizeDelta))
-            .background(tint.opacity(0.20))
-            .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 2) }
-            .clipShape(RoundedRectangle(cornerRadius: 4)).opacity(task.status == .completed ? 0.5 : 1)
+            .background(tint.opacity(0.26))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(tint.opacity(0.34)))
+            .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 3) }
+            .clipShape(RoundedRectangle(cornerRadius: 7)).opacity(task.status == .completed ? 0.5 : 1)
+            .animation(.easeOut(duration: 0.14), value: resizeDelta)
     }
 }
 private struct TaskMonthView: View {
