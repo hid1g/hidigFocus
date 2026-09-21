@@ -531,8 +531,7 @@ private struct BlockScheduleEditor: View {
     private func timeField(_ title: String, minute: Binding<Int>) -> some View {
         HStack(spacing: 7) {
             Text(title).hidigFont(size: 11, weight: .medium).foregroundStyle(HidigPalette.secondary)
-            DatePicker("", selection: dateBinding(for: minute), displayedComponents: .hourAndMinute)
-                .labelsHidden()
+            HidigTimeButton(date: dateBinding(for: minute))
         }
     }
 

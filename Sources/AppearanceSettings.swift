@@ -269,7 +269,7 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppIconOrnament {
+enum AppIconOrnament: String, Hashable {
     case plain, ring, frame, halo, rays, grid, sun, moon
 }
 
@@ -288,6 +288,7 @@ struct AppIconPreview: View {
                 AppIconOrnamentView(style: style, size: tileSize)
                 HidigGateMark(color: style.markColor)
                     .frame(width: tileSize * 0.54, height: tileSize * 0.54)
+                    .shadow(color: Color.black.opacity(0.18), radius: tileSize * 0.018, y: tileSize * 0.012)
             }
             .frame(width: tileSize, height: tileSize)
             .shadow(color: Color.black.opacity(0.13), radius: tileSize * 0.035, y: tileSize * 0.025)
@@ -305,21 +306,21 @@ private struct HidigGateMark: View {
             let height = geometry.size.height
             ZStack {
                 Path { path in
-                    path.move(to: CGPoint(x: width * 0.10, y: height * 0.16))
-                    path.addLine(to: CGPoint(x: width * 0.47, y: height * 0.32))
-                    path.addLine(to: CGPoint(x: width * 0.47, y: height * 0.88))
-                    path.addLine(to: CGPoint(x: width * 0.18, y: height * 0.74))
-                    path.addQuadCurve(to: CGPoint(x: width * 0.10, y: height * 0.60), control: CGPoint(x: width * 0.10, y: height * 0.70))
+                    path.move(to: CGPoint(x: width * 0.10, y: height * 0.22))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.47, y: height * 0.35), control: CGPoint(x: width * 0.28, y: height * 0.24))
+                    path.addLine(to: CGPoint(x: width * 0.47, y: height * 0.84))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.18, y: height * 0.72), control: CGPoint(x: width * 0.31, y: height * 0.78))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.10, y: height * 0.58), control: CGPoint(x: width * 0.10, y: height * 0.68))
                     path.closeSubpath()
                 }
                 .fill(color)
 
                 Path { path in
-                    path.move(to: CGPoint(x: width * 0.90, y: height * 0.16))
-                    path.addLine(to: CGPoint(x: width * 0.53, y: height * 0.32))
-                    path.addLine(to: CGPoint(x: width * 0.53, y: height * 0.88))
-                    path.addLine(to: CGPoint(x: width * 0.82, y: height * 0.74))
-                    path.addQuadCurve(to: CGPoint(x: width * 0.90, y: height * 0.60), control: CGPoint(x: width * 0.90, y: height * 0.70))
+                    path.move(to: CGPoint(x: width * 0.90, y: height * 0.22))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.53, y: height * 0.35), control: CGPoint(x: width * 0.72, y: height * 0.24))
+                    path.addLine(to: CGPoint(x: width * 0.53, y: height * 0.84))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.82, y: height * 0.72), control: CGPoint(x: width * 0.69, y: height * 0.78))
+                    path.addQuadCurve(to: CGPoint(x: width * 0.90, y: height * 0.58), control: CGPoint(x: width * 0.90, y: height * 0.68))
                     path.closeSubpath()
                 }
                 .fill(color)
@@ -344,19 +345,45 @@ private struct AppIconOrnamentView: View {
         case .plain:
             Circle().fill(Color.black.opacity(0.10)).frame(width: size * 0.68, height: size * 0.68)
         case .ring:
-            Circle().stroke(style.markColor.opacity(0.22), lineWidth: size * 0.035).frame(width: size * 0.72, height: size * 0.72)
+            ZStack {
+                Circle().stroke(style.markColor.opacity(0.28), lineWidth: size * 0.035).frame(width: size * 0.76, height: size * 0.76)
+                Circle().stroke(style.markColor.opacity(0.14), lineWidth: size * 0.018).frame(width: size * 0.88, height: size * 0.88)
+            }
         case .frame:
-            RoundedRectangle(cornerRadius: size * 0.13).stroke(Color.white.opacity(0.18), lineWidth: size * 0.025).frame(width: size * 0.72, height: size * 0.72)
+            ZStack {
+                RoundedRectangle(cornerRadius: size * 0.13).stroke(Color.white.opacity(0.25), lineWidth: size * 0.025).frame(width: size * 0.76, height: size * 0.76)
+                ForEach([-1.0, 0, 1.0], id: \.self) { offset in
+                    Capsule().fill(Color.white.opacity(0.08)).frame(width: size * 0.72, height: size * 0.035).rotationEffect(.degrees(-34)).offset(x: size * 0.16 * offset)
+                }
+            }
         case .halo:
-            Circle().fill(Color.white.opacity(0.12)).frame(width: size * 0.74, height: size * 0.74).blur(radius: size * 0.045)
+            ZStack {
+                Circle().fill(Color.white.opacity(0.14)).frame(width: size * 0.78, height: size * 0.78).blur(radius: size * 0.035)
+                Circle().stroke(Color.white.opacity(0.28), lineWidth: size * 0.018).frame(width: size * 0.62, height: size * 0.62)
+                Circle().fill(Color.white.opacity(0.7)).frame(width: size * 0.055).offset(x: size * 0.32, y: -size * 0.18)
+            }
         case .rays:
-            Circle().stroke(Color.white.opacity(0.24), style: StrokeStyle(lineWidth: size * 0.02, dash: [size * 0.06, size * 0.045])).frame(width: size * 0.78, height: size * 0.78)
+            ZStack {
+                Circle().stroke(Color.white.opacity(0.34), style: StrokeStyle(lineWidth: size * 0.025, dash: [size * 0.07, size * 0.04])).frame(width: size * 0.82, height: size * 0.82)
+                Circle().fill(Color.white.opacity(0.14)).frame(width: size * 0.65, height: size * 0.65)
+            }
         case .grid:
-            RoundedRectangle(cornerRadius: size * 0.08).fill(Color.white.opacity(0.10)).frame(width: size * 0.76, height: size * 0.76)
+            ZStack {
+                RoundedRectangle(cornerRadius: size * 0.09).fill(Color.white.opacity(0.11)).frame(width: size * 0.78, height: size * 0.78)
+                Rectangle().fill(Color.white.opacity(0.18)).frame(width: size * 0.015, height: size * 0.72)
+                Rectangle().fill(Color.white.opacity(0.18)).frame(width: size * 0.72, height: size * 0.015)
+            }
         case .sun:
-            Circle().fill(Color.white.opacity(0.15)).frame(width: size * 0.74, height: size * 0.74)
+            ZStack {
+                Circle().fill(Color.white.opacity(0.22)).frame(width: size * 0.48, height: size * 0.48).offset(y: -size * 0.18)
+                RoundedRectangle(cornerRadius: size * 0.08).fill(Color.black.opacity(0.08)).frame(width: size * 0.82, height: size * 0.38).offset(y: size * 0.23)
+            }
         case .moon:
-            Circle().stroke(Color.white.opacity(0.18), lineWidth: size * 0.03).frame(width: size * 0.74, height: size * 0.74).offset(x: size * 0.04)
+            ZStack {
+                Circle().fill(Color.white.opacity(0.22)).frame(width: size * 0.5, height: size * 0.5).offset(x: size * 0.18, y: -size * 0.16)
+                Circle().fill(style.colors.last ?? .black).frame(width: size * 0.45, height: size * 0.45).offset(x: size * 0.27, y: -size * 0.22)
+                Image(systemName: "sparkles").font(.system(size: size * 0.18, weight: .semibold)).foregroundStyle(Color.white.opacity(0.55)).offset(x: -size * 0.25, y: -size * 0.24)
+            }
         }
     }
 }

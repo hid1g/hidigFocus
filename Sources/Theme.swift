@@ -88,6 +88,185 @@ struct SoftPanel<Content: View>: View {
     }
 }
 
+struct HidigMenuOption: Identifiable, Equatable {
+    let id: String
+    let title: String
+    var systemImage: String? = nil
+}
+
+struct HidigMenuPicker: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
+    let options: [HidigMenuOption]
+    @Binding var selection: String
+    var leadingIcon: String? = nil
+    var maxListHeight: CGFloat = 280
+    @State private var isPresented = false
+
+    private var selected: HidigMenuOption? {
+        options.first { $0.id == selection }
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            HStack(spacing: 8) {
+                if let icon = leadingIcon ?? selected?.systemImage {
+                    Image(systemName: icon).frame(width: 15)
+                }
+                Text(selected?.title ?? "Выбрать")
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(HidigPalette.secondary)
+            }
+            .hidigFont(size: 11, weight: .semibold)
+            .padding(.horizontal, 11)
+            .frame(minHeight: 34)
+            .background(HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    ForEach(options) { option in
+                        Button {
+                            selection = option.id
+                            isPresented = false
+                        } label: {
+                            HStack(spacing: 9) {
+                                if let icon = option.systemImage {
+                                    Image(systemName: icon).frame(width: 16)
+                                }
+                                Text(option.title).lineLimit(1)
+                                Spacer(minLength: 12)
+                                if option.id == selection {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(HidigPalette.controlFill)
+                                }
+                            }
+                            .hidigFont(size: 12, weight: option.id == selection ? .semibold : .regular)
+                            .padding(.horizontal, 11)
+                            .frame(height: 36)
+                            .background(option.id == selection ? HidigPalette.lettuce.opacity(0.55) : .clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(7)
+            }
+            .frame(minWidth: 210, maxHeight: maxListHeight)
+            .background(HidigPalette.surface)
+        }
+    }
+}
+
+struct HidigDateButton: View {
+    @Binding var date: Date
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "calendar")
+                Text(date.formatted(.dateTime.day().month(.twoDigits).year()))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .hidigFont(size: 11, weight: .semibold)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            DatePicker("Дата", selection: $date, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .padding(12)
+                .frame(width: 280)
+                .background(HidigPalette.surface)
+        }
+    }
+}
+
+struct HidigTimeButton: View {
+    @Binding var date: Date
+    var stepMinutes = 30
+    @State private var isPresented = false
+
+    private var selectedMinute: Int {
+        Calendar.current.component(.hour, from: date) * 60 + Calendar.current.component(.minute, from: date)
+    }
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "clock")
+                Text(date.formatted(date: .omitted, time: .shortened))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .hidigFont(size: 11, weight: .semibold)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            ScrollViewReader { reader in
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(Array(stride(from: 0, to: 24 * 60, by: stepMinutes)), id: \.self) { minute in
+                            Button {
+                                setMinute(minute)
+                                isPresented = false
+                            } label: {
+                                HStack {
+                                    Text(timeLabel(minute))
+                                    Spacer()
+                                    if abs(selectedMinute - minute) < stepMinutes {
+                                        Image(systemName: "checkmark").foregroundStyle(HidigPalette.controlFill)
+                                    }
+                                }
+                                .hidigFont(size: 12, weight: abs(selectedMinute - minute) < stepMinutes ? .semibold : .regular)
+                                .padding(.horizontal, 12)
+                                .frame(height: 35)
+                                .background(abs(selectedMinute - minute) < stepMinutes ? HidigPalette.lettuce.opacity(0.55) : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .id(minute)
+                        }
+                    }
+                    .padding(7)
+                }
+                .frame(width: 160, height: 270)
+                .background(HidigPalette.surface)
+                .onAppear {
+                    reader.scrollTo((selectedMinute / stepMinutes) * stepMinutes, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func setMinute(_ minute: Int) {
+        date = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date) ?? date
+    }
+
+    private func timeLabel(_ minute: Int) -> String {
+        let value = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
+        return value.formatted(date: .omitted, time: .shortened)
+    }
+}
+
 struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HidigButtonBody(

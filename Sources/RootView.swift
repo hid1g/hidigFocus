@@ -45,6 +45,7 @@ struct RootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(HidigPalette.canvas)
         }
+        .animation(.interactiveSpring(response: 0.38, dampingFraction: 0.88), value: navigationCollapsed)
         .ignoresSafeArea()
         .sheet(isPresented: $showsDisableProtection) {
             DisableProtectionSheet(isPresented: $showsDisableProtection)
@@ -85,13 +86,7 @@ private struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
-                ZStack(alignment: .bottomTrailing) {
-                    AppIconPreview(style: .green, size: 38)
-                    if isCollapsed {
-                        collapseButton
-                            .offset(x: 5, y: 5)
-                    }
-                }
+                AppIconPreview(style: .green, size: 38)
                 if !isCollapsed { VStack(alignment: .leading, spacing: 1) {
                     Text("hidigFocus")
                         .hidigFont(size: 17, weight: .semibold, design: .rounded)
@@ -104,6 +99,7 @@ private struct Sidebar: View {
                         .foregroundStyle(foregroundColor.opacity(0.68))
                 }
                 .layoutPriority(1)
+                .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
                 if !isCollapsed {
                     Spacer(minLength: 4)
@@ -119,7 +115,7 @@ private struct Sidebar: View {
                 }
             }
             .padding(.horizontal, isCollapsed ? 8 : 12)
-            .padding(.top, 22)
+            .padding(.top, isCollapsed ? 52 : 22)
 
             Spacer()
 
@@ -167,12 +163,33 @@ private struct Sidebar: View {
         .overlay(alignment: .trailing) {
             Rectangle().fill(HidigPalette.line).frame(width: 1)
         }
-        .animation(.easeInOut(duration: 0.24), value: isCollapsed)
+        .overlay(alignment: .topTrailing) {
+            if isCollapsed {
+                collapseButton
+                    .padding(.top, 98)
+                    .padding(.trailing, 6)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18)
+                .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) * 1.3,
+                          abs(value.translation.width) > 44 else { return }
+                    if isCollapsed && value.translation.width > 0 {
+                        setCollapsed(false)
+                    } else if !isCollapsed && value.translation.width < 0 {
+                        setCollapsed(true)
+                    }
+                }
+        )
+        .animation(.interactiveSpring(response: 0.38, dampingFraction: 0.88), value: isCollapsed)
     }
 
     private var collapseButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.24)) { isCollapsed.toggle() }
+            setCollapsed(!isCollapsed)
         } label: {
             Image(systemName: isCollapsed ? "sidebar.right" : "sidebar.left")
                 .font(.system(size: 11, weight: .semibold))
@@ -184,6 +201,12 @@ private struct Sidebar: View {
         .buttonStyle(.plain)
         .help(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
         .accessibilityLabel(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
+    }
+
+    private func setCollapsed(_ value: Bool) {
+        withAnimation(.interactiveSpring(response: 0.38, dampingFraction: 0.88)) {
+            isCollapsed = value
+        }
     }
 }
 

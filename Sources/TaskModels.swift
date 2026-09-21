@@ -57,6 +57,18 @@ enum CalendarZoom {
     }
 }
 
+enum CalendarNavigation {
+    static func swipedAnchor(
+        from anchor: Date,
+        mode: TaskCalendarMode,
+        direction: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        let component: Calendar.Component = mode == .month ? .month : .day
+        return calendar.date(byAdding: component, value: direction, to: anchor) ?? anchor
+    }
+}
+
 enum TaskSidebarSelection: Hashable {
     case today
     case nextSevenDays

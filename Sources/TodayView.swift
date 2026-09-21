@@ -93,14 +93,12 @@ struct TodayView: View {
             HStack {
                 SectionEyebrow(text: "Задачи сегодня")
                 Spacer()
-                Picker("Проект", selection: $selectedProjectID) {
-                    Text("Все проекты").tag("all")
-                    ForEach(projectOptions, id: \.id) { project in
-                        Text(project.name).tag(project.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
+                HidigMenuPicker(
+                    options: [HidigMenuOption(id: "all", title: "Все проекты", systemImage: "tray.full")] +
+                        projectOptions.map { HidigMenuOption(id: $0.id, title: $0.name, systemImage: "list.bullet") },
+                    selection: $selectedProjectID,
+                    leadingIcon: "tray.full"
+                )
                 .frame(maxWidth: 190)
                 if let date = store.state.lastSuccessfulSync {
                     Text("Обновлено \(date.formatted(date: .omitted, time: .shortened))")
@@ -143,13 +141,21 @@ struct TodayView: View {
 
                 if !completedTaskGroups.isEmpty {
                     Divider().overlay(HidigPalette.line)
-                    DisclosureGroup(isExpanded: $showsCompletedTasks) {
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { showsCompletedTasks },
+                        set: { value in
+                            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.9)) {
+                                showsCompletedTasks = value
+                            }
+                        }
+                    )) {
                         VStack(alignment: .leading, spacing: 18) {
                             ForEach(completedTaskGroups) { group in
                                 projectTaskSection(group)
                             }
                         }
                         .padding(.top, 14)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     } label: {
                         Text("Выполнено (\(filteredTasks.filter(\.isCompleted).count))")
                             .hidigFont(size: 12, weight: .semibold)

@@ -20,6 +20,22 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(CalendarZoom.clamp(180), 120)
     }
 
+    func testCalendarSwipeAdvancesTimedViewsByOneDayAndMonthViewByOneMonth() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let anchor = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 27, hour: 12)))
+
+        let nextFourDays = CalendarNavigation.swipedAnchor(from: anchor, mode: .fourDays, direction: 1, calendar: calendar)
+        let nextMonth = CalendarNavigation.swipedAnchor(from: anchor, mode: .month, direction: 1, calendar: calendar)
+
+        XCTAssertEqual(calendar.component(.day, from: nextFourDays), 28)
+        XCTAssertEqual(calendar.component(.month, from: nextMonth), 10)
+    }
+
+    func testEveryDockIconUsesADistinctComposition() {
+        XCTAssertEqual(Set(AppIconPreference.allCases.map(\.ornament)).count, AppIconPreference.allCases.count)
+    }
+
     func testKnownServiceAliasesAreBlockedTogether() {
         XCTAssertEqual(Set(LocalRulesServer.expandedDomains(for: "vk.com")), Set(["vk.com", "vk.ru"]))
         XCTAssertEqual(Set(LocalRulesServer.expandedDomains(for: "https://vk.ru/feed")), Set(["vk.com", "vk.ru"]))
