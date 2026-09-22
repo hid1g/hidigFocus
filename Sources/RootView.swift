@@ -9,21 +9,34 @@ struct RootView: View {
     @State private var showsDisableProtection = false
     @AppStorage("navigationCollapsed") private var navigationCollapsed = true
     @AppStorage("navigationWidth") private var navigationWidth = 240.0
+    @GestureState private var navigationDragX: CGFloat = 0
 
     private var resolvedNavigationWidth: Double {
         min(320, max(224, navigationWidth))
+    }
+
+    private var displayedNavigationWidth: CGFloat {
+        let collapsedWidth: CGFloat = 64
+        let expandedWidth = CGFloat(resolvedNavigationWidth)
+        let base = navigationCollapsed ? collapsedWidth : expandedWidth
+        let directionalDrag = navigationCollapsed ? max(0, navigationDragX) : min(0, navigationDragX)
+        return min(expandedWidth, max(collapsedWidth, base + directionalDrag))
+    }
+
+    private var sidebarIsCompact: Bool {
+        displayedNavigationWidth < 148
     }
 
     var body: some View {
         HStack(spacing: 0) {
             Sidebar(
                 showsDisableProtection: $showsDisableProtection,
-                isCollapsed: $navigationCollapsed,
+                isCollapsed: sidebarIsCompact,
                 backgroundColor: HidigPalette.sidebar,
                 foregroundColor: HidigPalette.forest
             )
-                .frame(width: navigationCollapsed ? 64 : resolvedNavigationWidth)
-            if !navigationCollapsed {
+                .frame(width: displayedNavigationWidth)
+            if !navigationCollapsed && navigationDragX == 0 {
                 PanelResizeHandle(width: $navigationWidth, bounds: 224...320)
             }
 
@@ -45,7 +58,9 @@ struct RootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(HidigPalette.canvas)
         }
-        .animation(.interactiveSpring(response: 0.38, dampingFraction: 0.88), value: navigationCollapsed)
+        .contentShape(Rectangle())
+        .simultaneousGesture(navigationGesture)
+        .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.92), value: navigationCollapsed)
         .ignoresSafeArea()
         .sheet(isPresented: $showsDisableProtection) {
             DisableProtectionSheet(isPresented: $showsDisableProtection)
@@ -73,13 +88,34 @@ struct RootView: View {
         }
     }
 
+    private var navigationGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .updating($navigationDragX) { value, state, _ in
+                let boundary = navigationCollapsed ? 92 : CGFloat(resolvedNavigationWidth) + 18
+                guard value.startLocation.x <= boundary,
+                      abs(value.translation.width) > abs(value.translation.height) * 1.15 else { return }
+                state = value.translation.width
+            }
+            .onEnded { value in
+                let boundary = navigationCollapsed ? 92 : CGFloat(resolvedNavigationWidth) + 18
+                guard value.startLocation.x <= boundary,
+                      abs(value.translation.width) > abs(value.translation.height) * 1.15 else { return }
+                let projected = value.predictedEndTranslation.width
+                if navigationCollapsed, projected > 48 {
+                    navigationCollapsed = false
+                } else if !navigationCollapsed, projected < -48 {
+                    navigationCollapsed = true
+                }
+            }
+    }
+
 }
 
 private struct Sidebar: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Binding var showsDisableProtection: Bool
-    @Binding var isCollapsed: Bool
+    let isCollapsed: Bool
     let backgroundColor: Color
     let foregroundColor: Color
 
@@ -100,10 +136,6 @@ private struct Sidebar: View {
                 }
                 .layoutPriority(1)
                 .transition(.opacity.combined(with: .move(edge: .leading)))
-                }
-                if !isCollapsed {
-                    Spacer(minLength: 4)
-                    collapseButton
                 }
             }
             .padding(.top, 48)
@@ -163,50 +195,7 @@ private struct Sidebar: View {
         .overlay(alignment: .trailing) {
             Rectangle().fill(HidigPalette.line).frame(width: 1)
         }
-        .overlay(alignment: .topTrailing) {
-            if isCollapsed {
-                collapseButton
-                    .padding(.top, 98)
-                    .padding(.trailing, 6)
-                    .transition(.opacity)
-            }
-        }
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 18)
-                .onEnded { value in
-                    guard abs(value.translation.width) > abs(value.translation.height) * 1.3,
-                          abs(value.translation.width) > 44 else { return }
-                    if isCollapsed && value.translation.width > 0 {
-                        setCollapsed(false)
-                    } else if !isCollapsed && value.translation.width < 0 {
-                        setCollapsed(true)
-                    }
-                }
-        )
         .animation(.interactiveSpring(response: 0.38, dampingFraction: 0.88), value: isCollapsed)
-    }
-
-    private var collapseButton: some View {
-        Button {
-            setCollapsed(!isCollapsed)
-        } label: {
-            Image(systemName: isCollapsed ? "sidebar.right" : "sidebar.left")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 26, height: 26)
-                .background(backgroundColor.opacity(0.92))
-                .overlay(Circle().stroke(foregroundColor.opacity(0.22)))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
-        .accessibilityLabel(isCollapsed ? "Развернуть навигацию" : "Свернуть навигацию")
-    }
-
-    private func setCollapsed(_ value: Bool) {
-        withAnimation(.interactiveSpring(response: 0.38, dampingFraction: 0.88)) {
-            isCollapsed = value
-        }
     }
 }
 
