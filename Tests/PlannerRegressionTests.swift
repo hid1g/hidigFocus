@@ -76,6 +76,15 @@ final class PlannerRegressionTests: XCTestCase {
         XCTAssertEqual(result["later"]?.laneCount, 1)
     }
 
+    func testQuarterHourTasksTouchingAtBoundaryKeepFullWidth() {
+        let result = PlannerLayout.placements([
+            PlannerInterval(id: "first", start: 20 * 60 + 45, end: 21 * 60),
+            PlannerInterval(id: "second", start: 21 * 60, end: 21 * 60 + 15)
+        ])
+        XCTAssertEqual(result["first"]?.laneCount, 1)
+        XCTAssertEqual(result["second"]?.laneCount, 1)
+    }
+
     func testDraggingResetsOldDeadlineAndUnscheduledClearsDates() throws {
         var state = PersistedAppState()
         let id = try XCTUnwrap(TaskEngine.addTask(title: "Task", listID: TaskList.inboxID, to: &state))

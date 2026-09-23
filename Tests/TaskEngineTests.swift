@@ -37,6 +37,28 @@ final class TaskEngineTests: XCTestCase {
         XCTAssertEqual(state.managedTasks.first(where: { $0.id == taskID })?.listID, list.id)
     }
 
+    func testDuplicateDetachesImportedTaskAndResetsProgress() throws {
+        var state = PersistedAppState()
+        let id = try XCTUnwrap(TaskEngine.addTask(title: "Повторить", listID: TaskList.inboxID, to: &state))
+        state.managedTasks[0].sourceID = "ticktick-123"
+        state.managedTasks[0].googleEventID = "google-123"
+        state.managedTasks[0].status = .completed
+        state.managedTasks[0].completedPomodoros = 3
+        state.managedTasks[0].checklist = [TaskChecklistItem(title: "Шаг", isCompleted: true)]
+
+        let duplicateID = try XCTUnwrap(TaskEngine.duplicate(id, in: &state))
+        let duplicate = try XCTUnwrap(state.managedTasks.first { $0.id == duplicateID })
+        XCTAssertEqual(state.managedTasks.count, 2)
+        XCTAssertEqual(duplicate.title, "Повторить")
+        XCTAssertNil(duplicate.sourceID)
+        XCTAssertNil(duplicate.googleEventID)
+        XCTAssertEqual(duplicate.status, .active)
+        XCTAssertEqual(duplicate.completedPomodoros, 0)
+        XCTAssertFalse(try XCTUnwrap(duplicate.checklist.first).isCompleted)
+        XCTAssertNotEqual(duplicate.checklist.first?.id, state.managedTasks[0].checklist.first?.id)
+        XCTAssertEqual(state.managedTasks[0].sourceID, "ticktick-123")
+    }
+
     func testPersistenceRoundTripAndLegacyMigration() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }

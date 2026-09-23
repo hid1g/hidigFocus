@@ -60,6 +60,44 @@ enum TaskEngine {
         return task.id
     }
 
+    static func duplicate(_ id: UUID, in state: inout PersistedAppState) -> UUID? {
+        guard let original = state.managedTasks.first(where: { $0.id == id }) else { return nil }
+        let now = Date()
+        func detachedCopy(of task: ManagedTask, parentID: UUID?) -> ManagedTask {
+            var copy = task
+            copy.id = UUID()
+            copy.parentTaskID = parentID
+            copy.sourceID = nil
+            copy.sourceName = nil
+            copy.sourceListID = nil
+            copy.tickTickBaseline = nil
+            copy.googleEventID = nil
+            copy.googleCalendarID = nil
+            copy.googleETag = nil
+            copy.googleUpdatedAt = nil
+            copy.lastSyncedAt = nil
+            copy.status = .active
+            copy.completedAt = nil
+            copy.deletedAt = nil
+            copy.createdAt = now
+            copy.modifiedAt = now
+            copy.changeHistory = []
+            copy.completedPomodoros = 0
+            copy.checklist = task.checklist.map { item in
+                var duplicate = item
+                duplicate.id = UUID()
+                duplicate.isCompleted = false
+                return duplicate
+            }
+            copy.subtasks = task.subtasks.map { detachedCopy(of: $0, parentID: copy.id) }
+            return copy
+        }
+        var copy = detachedCopy(of: original, parentID: original.parentTaskID)
+        copy.sortOrder = (state.managedTasks.map(\.sortOrder).max() ?? 0) + 1
+        state.managedTasks.append(copy)
+        return copy.id
+    }
+
     static func updateTask(_ task: ManagedTask, in state: inout PersistedAppState, now: Date = Date()) {
         guard let index = state.managedTasks.firstIndex(where: { $0.id == task.id }) else { return }
         var value = task

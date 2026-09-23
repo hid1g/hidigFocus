@@ -319,7 +319,7 @@ private struct TaskRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(CalendarTaskPressStyle(tint: HidigPalette.controlFill))
             .taskCard(task)
             if task.priority != .none {
                 Image(systemName: "flag.fill").foregroundStyle(task.priority == .high ? Color.red : HidigPalette.controlFill)
@@ -329,6 +329,7 @@ private struct TaskRow: View {
         .background(HidigPalette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .draggable(task.id.uuidString)
+        .contextMenu { TaskContextActions(task: task) }
     }
 }
 
@@ -368,13 +369,98 @@ private extension View {
     func taskCard(_ task: ManagedTask) -> some View { modifier(TaskCardModifier(task: task)) }
 }
 
+private struct TaskContextActions: View {
+    @EnvironmentObject private var store: AppStore
+    let task: ManagedTask
+
+    var body: some View {
+        Menu {
+            Button("Сегодня", systemImage: "sun.max") { move(to: Date()) }
+            Button("Завтра", systemImage: "sunrise") {
+                if let date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) { move(to: date) }
+            }
+            Button("Без даты", systemImage: "calendar.badge.minus") {
+                store.scheduleManagedTask(task.id, at: nil)
+            }
+        } label: { Label("Дата", systemImage: "calendar") }
+
+        Menu {
+            ForEach(TaskPriority.allCases) { priority in
+                Button {
+                    edit { $0.priority = priority }
+                } label: {
+                    Label(priority.title, systemImage: task.priority == priority ? "checkmark" : "flag")
+                }
+            }
+        } label: { Label("Приоритет", systemImage: "flag") }
+
+        Menu {
+            ForEach(store.taskLists) { list in
+                Button {
+                    edit { $0.listID = list.id }
+                } label: {
+                    Label(list.name, systemImage: task.listID == list.id ? "checkmark" : "list.bullet")
+                }
+            }
+        } label: { Label("Переместить в", systemImage: "folder") }
+
+        Menu {
+            ForEach(Array(Set(store.state.managedTasks.flatMap(\.tags))).sorted(), id: \.self) { tag in
+                Button {
+                    edit { value in
+                        if value.tags.contains(tag) { value.tags.removeAll { $0 == tag } }
+                        else { value.tags.append(tag) }
+                    }
+                } label: {
+                    Label(tag, systemImage: task.tags.contains(tag) ? "checkmark" : "tag")
+                }
+            }
+            Button("Изменить метки…") { store.selectedTaskID = task.id }
+        } label: { Label("Метки", systemImage: "tag") }
+
+        Divider()
+        Button("Фокусироваться", systemImage: "timer") { store.startPomodoro(for: task.id) }
+        Button("Дублировать", systemImage: "plus.square.on.square") { store.duplicateManagedTask(task.id) }
+        Button("Не буду делать", systemImage: "xmark.square") {
+            edit { $0.status = .wontDo }
+        }
+        Divider()
+        Button("Удалить", systemImage: "trash", role: .destructive) { store.trashManagedTask(task.id) }
+    }
+
+    private func edit(_ change: (inout ManagedTask) -> Void) {
+        guard var current = store.state.managedTasks.first(where: { $0.id == task.id }) else { return }
+        change(&current)
+        store.updateManagedTask(current)
+    }
+
+    private func move(to day: Date) {
+        let calendar = Calendar.current
+        let date = task.isAllDay ? calendar.startOfDay(for: day) : {
+            let time = calendar.dateComponents([.hour, .minute], from: task.startDate ?? Date())
+            return calendar.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day)
+                ?? calendar.startOfDay(for: day)
+        }()
+        store.scheduleManagedTask(task.id, at: date)
+    }
+}
+
+private struct CalendarTaskPressStyle: ButtonStyle {
+    let tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(tint.opacity(configuration.isPressed ? 0.18 : 0))
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 private struct TaskCalendarView: View {
     @EnvironmentObject private var store: AppStore
     let searchText: String
     @AppStorage("calendarHourHeight") private var hourHeight = 72.0
     @State private var magnificationStart: Double?
     @State private var isMagnifying = false
-    @State private var slideDirection = 1
     private let calendar = Calendar.current
 
     var body: some View {
@@ -388,23 +474,12 @@ private struct TaskCalendarView: View {
                 } label: { Image(systemName: "plus") }
                     .buttonStyle(HidigIconButtonStyle()).help("Новая задача")
                 calendarModeMenu
-                HStack(spacing: 0) {
-                    Button { movePeriod(-1) } label: { Image(systemName: "chevron.left") }
-                    Divider().frame(height: 20)
-                    Button { movePeriod(1) } label: { Image(systemName: "chevron.right") }
-                }
-                .buttonStyle(.plain)
-                .frame(height: 32)
-                .padding(.horizontal, 6)
-                .background(HidigPalette.surface)
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
-                .clipShape(RoundedRectangle(cornerRadius: 9))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             calendarBody
         }
-        .animation(.easeInOut(duration: 0.22), value: store.taskCalendarMode)
+        .animation(.easeInOut(duration: 0.18), value: store.taskCalendarMode)
         .background(CalendarHorizontalScrollMonitor(isEnabled: !isMagnifying) { stepCalendar($0) })
     }
 
@@ -537,35 +612,18 @@ private struct TaskCalendarView: View {
                         }
                 }
                 .frame(width: gutterWidth + width * CGFloat(count))
-                .id(start)
-                .transition(.asymmetric(
-                    insertion: .move(edge: slideDirection > 0 ? .trailing : .leading).combined(with: .opacity),
-                    removal: .move(edge: slideDirection > 0 ? .leading : .trailing).combined(with: .opacity)
-                ))
             }
-        }
-    }
-
-    private func movePeriod(_ direction: Int) {
-        let count = store.taskCalendarMode == .fourDays ? 4 : (store.taskCalendarMode == .week ? 7 : 1)
-        slideDirection = direction
-        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.92)) {
-            store.taskCalendarAnchor = calendar.date(byAdding: store.taskCalendarMode == .month ? .month : .day,
-                value: direction * count, to: store.taskCalendarAnchor) ?? store.taskCalendarAnchor
         }
     }
 
     private func stepCalendar(_ direction: Int) {
         guard !isMagnifying else { return }
-        slideDirection = direction
-        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.92)) {
-            store.taskCalendarAnchor = CalendarNavigation.swipedAnchor(
-                from: store.taskCalendarAnchor,
-                mode: store.taskCalendarMode,
-                direction: direction,
-                calendar: calendar
-            )
-        }
+        store.taskCalendarAnchor = CalendarNavigation.swipedAnchor(
+            from: store.taskCalendarAnchor,
+            mode: store.taskCalendarMode,
+            direction: direction,
+            calendar: calendar
+        )
     }
 }
 
@@ -596,6 +654,7 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
         weak var view: NSView?
         private var monitor: Any?
         private var accumulatedX: CGFloat = 0
+        private var handledGesture = false
 
         init(isEnabled: Bool, onStep: @escaping (Int) -> Void) {
             self.isEnabled = isEnabled
@@ -622,18 +681,30 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
                 accumulatedX = 0
                 return
             }
-            let point = view.convert(event.locationInWindow, from: nil)
-            guard view.bounds.contains(point) else { return }
-            let horizontal = event.scrollingDeltaX
-            guard event.momentumPhase.isEmpty,
-                  abs(horizontal) > 4,
-                  abs(horizontal) > abs(event.scrollingDeltaY) * 1.6 else { return }
-            if event.phase.contains(.began) { accumulatedX = 0 }
+            if event.phase.contains(.began) {
+                accumulatedX = 0
+                handledGesture = false
+            }
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+                if !handledGesture && abs(accumulatedX) >= 28 { step(accumulatedX) }
+                accumulatedX = 0
+                handledGesture = false
+                return
+            }
+            guard event.momentumPhase.isEmpty, !handledGesture else { return }
+            let horizontal = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.deltaX
+            let vertical = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
+            guard abs(horizontal) > 0.5,
+                  abs(horizontal) > abs(vertical) * 1.25 else { return }
             accumulatedX += horizontal
-            let gestureEnded = event.phase.contains(.ended) || event.phase.contains(.cancelled)
-            guard (gestureEnded && abs(accumulatedX) >= 42) || (event.phase.isEmpty && abs(accumulatedX) >= 70) else { return }
-            let direction = accumulatedX < 0 ? 1 : -1
+            guard abs(accumulatedX) >= 55 else { return }
+            step(accumulatedX)
+            handledGesture = !event.phase.isEmpty
             accumulatedX = 0
+        }
+
+        private func step(_ delta: CGFloat) {
+            let direction = delta < 0 ? 1 : -1
             DispatchQueue.main.async { [onStep] in onStep(direction) }
         }
     }
@@ -649,16 +720,20 @@ private struct CalendarCompactTask: View {
         HStack(spacing: 4) {
             TaskCompletionButton(task: task)
             Button { store.selectedTaskID = task.id } label: {
-                Text(task.title).font(.system(size: 11)).lineLimit(1)
+                Text(task.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).taskCard(task).draggable(task.id.uuidString)
+            }
+            .buttonStyle(CalendarTaskPressStyle(tint: tint))
+            .taskCard(task)
+            .draggable(task.id.uuidString)
         }
         .padding(.horizontal, 5)
         .frame(minHeight: 23)
         .background(tint.opacity(task.status == .completed ? 0.07 : 0.18))
         .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 2) }
         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-            .opacity(task.status == .completed ? 0.55 : 1)
+        .opacity(task.status == .completed ? 0.55 : 1)
+        .contextMenu { TaskContextActions(task: task) }
     }
 }
 
@@ -687,31 +762,37 @@ private struct DayTimelineColumn: View {
     private func interval(_ task: ManagedTask) -> PlannerInterval {
         let start = task.startDate ?? task.dueDate ?? day
         return PlannerInterval(id: task.id.uuidString, start: minute(start),
-            end: min(1440, max(minute(start) + 20, minute(task.calendarEndDate ?? start.addingTimeInterval(Double(task.durationMinutes * 60))))))
+            end: min(1440, max(minute(start) + 1, minute(task.calendarEndDate ?? start.addingTimeInterval(Double(task.durationMinutes * 60))))))
     }
     var body: some View {
         let intervals = tasks.map(interval) + events.map {
-            PlannerInterval(id: $0.id, start: minute($0.startDate), end: max(minute($0.startDate) + 20, minute($0.endDate)))
+            PlannerInterval(id: $0.id, start: minute($0.startDate), end: max(minute($0.startDate) + 1, minute($0.endDate)))
         }
         let placements = PlannerLayout.placements(intervals)
         ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                ForEach(0..<24, id: \.self) { _ in
-                    Color.clear.frame(height: hourHeight).overlay(alignment: .top) { Divider() }
+            Canvas { context, _ in
+                var lines = Path()
+                for hour in 0..<24 {
+                    let y = CGFloat(hour) * hourHeight
+                    lines.move(to: CGPoint(x: 0, y: y))
+                    lines.addLine(to: CGPoint(x: width, y: y))
                 }
+                context.stroke(lines, with: .color(HidigPalette.line), lineWidth: 0.5)
             }
+            .frame(width: width, height: hourHeight * 24)
+            .allowsHitTesting(false)
             ForEach(tasks) { task in
                 let slot = interval(task)
                 let placement = placements[task.id.uuidString] ?? PlannerPlacement(lane: 0, laneCount: 1)
                 let laneWidth = (width - 4) / CGFloat(placement.laneCount)
-                CalendarTaskBlock(task: task, width: laneWidth - 3, height: CGFloat(slot.end - slot.start) / 60 * hourHeight)
+                CalendarTaskBlock(task: task, width: laneWidth - 3, height: CGFloat(slot.end - slot.start) / 60 * hourHeight, hourHeight: hourHeight)
                     .offset(x: 2 + CGFloat(placement.lane) * laneWidth, y: CGFloat(slot.start) / 60 * hourHeight)
             }
             ForEach(events, id: \.id) { event in
                 let placement = placements[event.id] ?? PlannerPlacement(lane: 0, laneCount: 1)
                 let laneWidth = (width - 4) / CGFloat(placement.laneCount)
                 Text(event.title).font(.system(size: 11)).padding(4)
-                    .frame(width: laneWidth - 3, height: max(22, CGFloat(minute(event.endDate) - minute(event.startDate)) / 60 * hourHeight), alignment: .topLeading)
+                    .frame(width: laneWidth - 3, height: max(1, CGFloat(minute(event.endDate) - minute(event.startDate)) / 60 * hourHeight), alignment: .topLeading)
                         .background(HidigPalette.lettuce.opacity(0.72)).clipShape(RoundedRectangle(cornerRadius: 7))
                     .offset(x: 2 + CGFloat(placement.lane) * laneWidth, y: CGFloat(minute(event.startDate)) / 60 * hourHeight)
             }
@@ -736,6 +817,7 @@ private struct CalendarTaskBlock: View {
     let task: ManagedTask
     let width: CGFloat
     let height: CGFloat
+    let hourHeight: CGFloat
     @State private var resizeDelta: CGFloat = 0
     private var tint: Color {
         Color(hex: store.taskLists.first { $0.id == task.listID }?.colorHex ?? "#6A9CC2")
@@ -746,28 +828,32 @@ private struct CalendarTaskBlock: View {
                 TaskCompletionButton(task: task)
                 Button { store.selectedTaskID = task.id } label: {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).font(.system(size: 11, weight: .medium)).lineLimit(height > 50 ? 2 : 1)
+                        Text(task.title).font(.system(size: 12, weight: .medium)).lineLimit(height > 50 ? 2 : 1)
                         if height > 36, let start = task.startDate, let end = task.calendarEndDate {
                             Text("\(start.formatted(date: .omitted, time: .shortened))–\(end.formatted(date: .omitted, time: .shortened))")
-                                .font(.system(size: 9)).foregroundStyle(HidigPalette.secondary)
+                                .font(.system(size: 10)).foregroundStyle(HidigPalette.secondary)
                         }
                         Spacer(minLength: 0)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).contentShape(Rectangle())
-                }.buttonStyle(.plain).taskCard(task).draggable(task.id.uuidString)
+                }
+                .buttonStyle(CalendarTaskPressStyle(tint: tint))
+                .taskCard(task)
+                .draggable(task.id.uuidString)
             }.padding(4)
             Rectangle().fill(Color.clear).frame(height: 4)
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 2).onChanged { resizeDelta = $0.translation.height }
                     .onEnded {
-                        store.scheduleManagedTask(task.id, at: task.startDate, durationMinutes: task.durationMinutes + Int($0.translation.height / 64 * 60).roundedToNearest(15))
+                        store.scheduleManagedTask(task.id, at: task.startDate, durationMinutes: task.durationMinutes + Int($0.translation.height / hourHeight * 60).roundedToNearest(15))
                         resizeDelta = 0
                     })
-        }.frame(width: width, height: max(22, height + resizeDelta))
+        }.frame(width: width, height: max(1, height + resizeDelta))
             .background(tint.opacity(0.20))
             .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 2) }
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .opacity(task.status == .completed ? 0.5 : 1)
             .animation(.easeOut(duration: 0.14), value: resizeDelta)
+            .contextMenu { TaskContextActions(task: task) }
     }
 }
 private struct TaskMonthView: View {
@@ -790,7 +876,11 @@ private struct TaskMonthView: View {
                     ForEach(store.calendarTasks(on: day).prefix(3)) { task in
                         Button { store.selectedTaskID = task.id } label: {
                             Text(task.title).hidigFont(size: 9).lineLimit(1)
-                        }.buttonStyle(.plain).taskCard(task).draggable(task.id.uuidString)
+                        }
+                        .buttonStyle(CalendarTaskPressStyle(tint: HidigPalette.controlFill))
+                        .taskCard(task)
+                        .draggable(task.id.uuidString)
+                        .contextMenu { TaskContextActions(task: task) }
                     }
                     if store.calendarTasks(on: day).count > 3 {
                         Button("Ещё \(store.calendarTasks(on: day).count - 3)") {

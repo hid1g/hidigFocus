@@ -149,7 +149,8 @@ final class AppStore: NSObject, ObservableObject {
         let first = Calendar.current.startOfDay(for: day)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: first) ?? first
         return state.managedTasks.filter {
-            guard $0.status != .trashed, let start = $0.startDate ?? $0.dueDate else { return false }
+            guard $0.status == .active || $0.status == .completed,
+                  let start = $0.startDate ?? $0.dueDate else { return false }
             if $0.isAllDay { return Calendar.current.isDate(start, inSameDayAs: day) }
             return start < end && ($0.calendarEndDate ?? start.addingTimeInterval(Double($0.durationMinutes * 60))) > first
         }.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
@@ -476,6 +477,10 @@ final class AppStore: NSObject, ObservableObject {
     func setManagedTaskCompleted(_ id: UUID, completed: Bool) {
         TaskEngine.setCompleted(id, completed: completed, in: &state)
         save()
+    }
+
+    func duplicateManagedTask(_ id: UUID) {
+        if TaskEngine.duplicate(id, in: &state) != nil { save() }
     }
 
     func trashManagedTask(_ id: UUID) {
