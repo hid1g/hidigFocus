@@ -455,12 +455,39 @@ private struct CalendarTaskPressStyle: ButtonStyle {
     }
 }
 
+private final class CalendarPanState: ObservableObject {
+    @Published var offset: CGFloat = 0
+    var dayWidth: CGFloat = 200
+}
+
+private struct CalendarSlidingStrip<Content: View>: View {
+    @ObservedObject var pan: CalendarPanState
+    let columnWidth: CGFloat
+    let visibleWidth: CGFloat
+    let content: Content
+
+    init(pan: CalendarPanState, columnWidth: CGFloat, visibleWidth: CGFloat, @ViewBuilder content: () -> Content) {
+        self.pan = pan
+        self.columnWidth = columnWidth
+        self.visibleWidth = visibleWidth
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .offset(x: pan.offset - columnWidth)
+            .frame(width: visibleWidth, alignment: .leading)
+            .clipped()
+    }
+}
+
 private struct TaskCalendarView: View {
     @EnvironmentObject private var store: AppStore
     let searchText: String
     @AppStorage("calendarHourHeight") private var hourHeight = 72.0
     @State private var magnificationStart: Double?
     @State private var isMagnifying = false
+    @StateObject private var pan = CalendarPanState()
     private let calendar = Calendar.current
 
     var body: some View {
@@ -480,7 +507,9 @@ private struct TaskCalendarView: View {
             calendarBody
         }
         .animation(.easeInOut(duration: 0.18), value: store.taskCalendarMode)
-        .background(CalendarHorizontalScrollMonitor(isEnabled: !isMagnifying) { stepCalendar($0) })
+        .background(CalendarHorizontalScrollMonitor(isEnabled: !isMagnifying) { delta, ended in
+            handleHorizontalScroll(delta: delta, ended: ended)
+        })
     }
 
     private var calendarModeMenu: some View {
@@ -512,12 +541,11 @@ private struct TaskCalendarView: View {
         case .day, .fourDays, .week:
             GeometryReader { geometry in
                 let count = store.taskCalendarMode == .day ? 1 : (store.taskCalendarMode == .fourDays ? 4 : 7)
-                let start = store.taskCalendarMode == .week
-                    ? (calendar.dateInterval(of: .weekOfYear, for: store.taskCalendarAnchor)?.start ?? store.taskCalendarAnchor)
-                    : calendar.startOfDay(for: store.taskCalendarAnchor)
-                let days = (0..<count).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+                let start = calendar.startOfDay(for: store.taskCalendarAnchor)
+                let days = (-1...count).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
                 let gutterWidth: CGFloat = 52
                 let width = max(76, (geometry.size.width - gutterWidth) / CGFloat(count))
+                let visibleWidth = width * CGFloat(count)
                 let maximumAllDayCount = days.map { day in
                     store.calendarTasks(on: day).filter { $0.isAllDay && matches($0) }.count
                 }.max() ?? 0
@@ -526,17 +554,22 @@ private struct TaskCalendarView: View {
                 VStack(spacing: 0) {
                         HStack(spacing: 0) {
                             Color.clear.frame(width: gutterWidth, height: 38)
-                            ForEach(days, id: \.self) { day in
-                                VStack(spacing: 1) {
-                                    Text(day.formatted(.dateTime.weekday(.abbreviated)))
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundStyle(HidigPalette.secondary)
-                                    Text(day.formatted(.dateTime.day()))
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(calendar.isDateInToday(day) ? HidigPalette.controlFill : HidigPalette.forest)
+                            CalendarSlidingStrip(pan: pan, columnWidth: width, visibleWidth: visibleWidth) {
+                                HStack(spacing: 0) {
+                                    ForEach(days, id: \.self) { day in
+                                        VStack(spacing: 1) {
+                                            Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(HidigPalette.secondary)
+                                            Text(day.formatted(.dateTime.day()))
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(calendar.isDateInToday(day) ? HidigPalette.controlFill : HidigPalette.forest)
+                                        }
+                                        .frame(width: width, height: 38)
+                                    }
                                 }
-                                .frame(width: width, height: 38)
                             }
+                            .frame(height: 38)
                         }
                         Divider()
                         HStack(spacing: 0) {
@@ -545,31 +578,36 @@ private struct TaskCalendarView: View {
                                 .foregroundStyle(HidigPalette.secondary)
                                 .frame(width: gutterWidth - 7, alignment: .trailing)
                                 .padding(.trailing, 7)
-                            ForEach(days, id: \.self) { day in
-                                let allDayTasks = store.calendarTasks(on: day).filter { $0.isAllDay && matches($0) }
-                                VStack(spacing: 2) {
-                                    ForEach(allDayTasks.prefix(5)) {
-                                        CalendarCompactTask(task: $0)
+                            CalendarSlidingStrip(pan: pan, columnWidth: width, visibleWidth: visibleWidth) {
+                                HStack(spacing: 0) {
+                                    ForEach(days, id: \.self) { day in
+                                        let allDayTasks = store.calendarTasks(on: day).filter { $0.isAllDay && matches($0) }
+                                        VStack(spacing: 2) {
+                                            ForEach(allDayTasks.prefix(5)) {
+                                                CalendarCompactTask(task: $0)
+                                            }
+                                            if allDayTasks.count > 5 {
+                                                Text("Ещё \(allDayTasks.count - 5)")
+                                                    .font(.system(size: 9, weight: .medium))
+                                                    .foregroundStyle(HidigPalette.secondary)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .padding(.horizontal, 5)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.horizontal, 3)
+                                        .padding(.vertical, 2)
+                                        .frame(width: width, height: allDayHeight, alignment: .top)
+                                        .overlay(alignment: .trailing) { Divider().opacity(0.65) }
+                                        .dropDestination(for: String.self) { values, _ in
+                                            guard let id = values.first.flatMap(UUID.init(uuidString:)) else { return false }
+                                            store.scheduleManagedTask(id, at: day, allDay: true)
+                                            return true
+                                        }
                                     }
-                                    if allDayTasks.count > 5 {
-                                        Text("Ещё \(allDayTasks.count - 5)")
-                                            .font(.system(size: 9, weight: .medium))
-                                            .foregroundStyle(HidigPalette.secondary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.horizontal, 5)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 2)
-                                .frame(width: width, height: allDayHeight, alignment: .top)
-                                .overlay(alignment: .trailing) { Divider().opacity(0.65) }
-                                .dropDestination(for: String.self) { values, _ in
-                                    guard let id = values.first.flatMap(UUID.init(uuidString:)) else { return false }
-                                    store.scheduleManagedTask(id, at: day, allDay: true)
-                                    return true
                                 }
                             }
+                            .frame(height: allDayHeight)
                         }
                         Divider()
                         ScrollViewReader { reader in
@@ -584,8 +622,12 @@ private struct TaskCalendarView: View {
                                                 .id(hour)
                                         }
                                     }
-                                    ForEach(days, id: \.self) { day in
-                                        DayTimelineColumn(day: day, width: width, searchText: searchText, hourHeight: CGFloat(hourHeight))
+                                    CalendarSlidingStrip(pan: pan, columnWidth: width, visibleWidth: visibleWidth) {
+                                        HStack(alignment: .top, spacing: 0) {
+                                            ForEach(days, id: \.self) { day in
+                                                DayTimelineColumn(day: day, width: width, searchText: searchText, hourHeight: CGFloat(hourHeight))
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -612,26 +654,64 @@ private struct TaskCalendarView: View {
                         }
                 }
                 .frame(width: gutterWidth + width * CGFloat(count))
+                .onAppear { pan.dayWidth = width }
+                .onChange(of: geometry.size.width) { _ in pan.dayWidth = width }
+                .onChange(of: store.taskCalendarMode) { _ in
+                    pan.dayWidth = width
+                    pan.offset = 0
+                }
             }
         }
     }
 
-    private func stepCalendar(_ direction: Int) {
+    private func handleHorizontalScroll(delta: CGFloat, ended: Bool) {
         guard !isMagnifying else { return }
-        store.taskCalendarAnchor = CalendarNavigation.swipedAnchor(
+        let width = max(1, pan.dayWidth)
+        if delta != 0 {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                let nextOffset = pan.offset + delta
+                if store.taskCalendarMode == .day || store.taskCalendarMode == .fourDays || store.taskCalendarMode == .week {
+                    let rebased = CalendarNavigation.rebasedSwipe(offset: nextOffset, dayWidth: width)
+                    if rebased.dayShift != 0 {
+                        store.taskCalendarAnchor = calendar.date(byAdding: .day, value: rebased.dayShift,
+                            to: store.taskCalendarAnchor) ?? store.taskCalendarAnchor
+                    }
+                    pan.offset = rebased.remainingOffset
+                } else {
+                    pan.offset = min(width, max(-width, nextOffset))
+                }
+            }
+        }
+        guard ended else { return }
+        guard let settled = CalendarNavigation.settledSwipe(offset: pan.offset, dayWidth: width) else {
+            withAnimation(.easeOut(duration: 0.22)) { pan.offset = 0 }
+            return
+        }
+        let next = CalendarNavigation.swipedAnchor(
             from: store.taskCalendarAnchor,
             mode: store.taskCalendarMode,
-            direction: direction,
+            direction: settled.direction,
             calendar: calendar
         )
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            store.taskCalendarAnchor = next
+            pan.offset = settled.remainingOffset
+        }
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.9)) {
+            pan.offset = 0
+        }
     }
 }
 
 private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
     let isEnabled: Bool
-    let onStep: (Int) -> Void
+    let onScroll: (CGFloat, Bool) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(isEnabled: isEnabled, onStep: onStep) }
+    func makeCoordinator() -> Coordinator { Coordinator(isEnabled: isEnabled, onScroll: onScroll) }
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
@@ -641,7 +721,7 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.isEnabled = isEnabled
-        context.coordinator.onStep = onStep
+        context.coordinator.onScroll = onScroll
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -650,15 +730,15 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
 
     final class Coordinator {
         var isEnabled: Bool
-        var onStep: (Int) -> Void
+        var onScroll: (CGFloat, Bool) -> Void
         weak var view: NSView?
         private var monitor: Any?
         private var accumulatedX: CGFloat = 0
-        private var handledGesture = false
+        private var finishWorkItem: DispatchWorkItem?
 
-        init(isEnabled: Bool, onStep: @escaping (Int) -> Void) {
+        init(isEnabled: Bool, onScroll: @escaping (CGFloat, Bool) -> Void) {
             self.isEnabled = isEnabled
-            self.onStep = onStep
+            self.onScroll = onScroll
         }
 
         func attach(to view: NSView) {
@@ -670,6 +750,7 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
         }
 
         func detach() {
+            finishWorkItem?.cancel()
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
@@ -683,29 +764,34 @@ private struct CalendarHorizontalScrollMonitor: NSViewRepresentable {
             }
             if event.phase.contains(.began) {
                 accumulatedX = 0
-                handledGesture = false
+                finishWorkItem?.cancel()
             }
             if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
-                if !handledGesture && abs(accumulatedX) >= 28 { step(accumulatedX) }
+                if accumulatedX != 0 { send(delta: 0, ended: true) }
                 accumulatedX = 0
-                handledGesture = false
                 return
             }
-            guard event.momentumPhase.isEmpty, !handledGesture else { return }
+            guard event.momentumPhase.isEmpty else { return }
             let horizontal = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.deltaX
             let vertical = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
             guard abs(horizontal) > 0.5,
                   abs(horizontal) > abs(vertical) * 1.25 else { return }
             accumulatedX += horizontal
-            guard abs(accumulatedX) >= 55 else { return }
-            step(accumulatedX)
-            handledGesture = !event.phase.isEmpty
-            accumulatedX = 0
+            send(delta: horizontal, ended: false)
+            if event.phase.isEmpty {
+                finishWorkItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.send(delta: 0, ended: true)
+                    self.accumulatedX = 0
+                }
+                finishWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
+            }
         }
 
-        private func step(_ delta: CGFloat) {
-            let direction = delta < 0 ? 1 : -1
-            DispatchQueue.main.async { [onStep] in onStep(direction) }
+        private func send(delta: CGFloat, ended: Bool) {
+            DispatchQueue.main.async { [onScroll] in onScroll(delta, ended) }
         }
     }
 }

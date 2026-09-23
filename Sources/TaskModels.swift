@@ -58,6 +58,28 @@ enum CalendarZoom {
 }
 
 enum CalendarNavigation {
+    static func rebasedSwipe(offset: CGFloat, dayWidth: CGFloat) -> (dayShift: Int, remainingOffset: CGFloat) {
+        let width = max(1, dayWidth)
+        var remaining = offset
+        var dayShift = 0
+        while remaining <= -width {
+            remaining += width
+            dayShift += 1
+        }
+        while remaining >= width {
+            remaining -= width
+            dayShift -= 1
+        }
+        return (dayShift, remaining)
+    }
+
+    static func settledSwipe(offset: CGFloat, dayWidth: CGFloat) -> (direction: Int, remainingOffset: CGFloat)? {
+        let width = max(1, dayWidth)
+        guard abs(offset) >= max(28, width * 0.18) else { return nil }
+        let direction = offset < 0 ? 1 : -1
+        return (direction, offset + CGFloat(direction) * width)
+    }
+
     static func swipedAnchor(
         from anchor: Date,
         mode: TaskCalendarMode,

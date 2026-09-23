@@ -32,6 +32,25 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(calendar.component(.month, from: nextMonth), 10)
     }
 
+    func testSwipeSettlesWithoutChangingVisibleColumnPosition() throws {
+        let forward = try XCTUnwrap(CalendarNavigation.settledSwipe(offset: -70, dayWidth: 200))
+        XCTAssertEqual(forward.direction, 1)
+        XCTAssertEqual(forward.remainingOffset, 130)
+        let backward = try XCTUnwrap(CalendarNavigation.settledSwipe(offset: 70, dayWidth: 200))
+        XCTAssertEqual(backward.direction, -1)
+        XCTAssertEqual(backward.remainingOffset, -130)
+        XCTAssertNil(CalendarNavigation.settledSwipe(offset: 20, dayWidth: 200))
+    }
+
+    func testLongSwipeRebasesAcrossSeveralDaysWithoutJump() {
+        let forward = CalendarNavigation.rebasedSwipe(offset: -530, dayWidth: 200)
+        XCTAssertEqual(forward.dayShift, 2)
+        XCTAssertEqual(forward.remainingOffset, -130)
+        let backward = CalendarNavigation.rebasedSwipe(offset: 530, dayWidth: 200)
+        XCTAssertEqual(backward.dayShift, -2)
+        XCTAssertEqual(backward.remainingOffset, 130)
+    }
+
     func testEveryDockIconUsesADistinctComposition() {
         XCTAssertEqual(Set(AppIconPreference.allCases.map(\.ornament)).count, AppIconPreference.allCases.count)
     }
