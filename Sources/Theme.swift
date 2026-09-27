@@ -456,6 +456,7 @@ private struct HidigButtonBody<Label: View>: View {
     }
 
     private var foreground: Color {
+        if !isEnabled { return HidigPalette.secondary }
         switch kind {
         case .primary:
             return .white

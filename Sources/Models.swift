@@ -1,6 +1,21 @@
 import Foundation
 import SwiftUI
 
+struct ProtectedResourceChange: Identifiable {
+    enum Operation { case update(UUID, String, String), remove(UUID), removeGroup, applyGroupRule }
+    let id = UUID()
+    let groupID: UUID
+    let operation: Operation
+    var title: String {
+        switch operation {
+        case .update: return "Изменить домен?"
+        case .remove: return "Удалить домен?"
+        case .removeGroup: return "Удалить группу с доменами?"
+        case .applyGroupRule: return "Изменить домены группы?"
+        }
+    }
+}
+
 enum AppSection: String, CaseIterable, Identifiable {
     case today
     case calendar

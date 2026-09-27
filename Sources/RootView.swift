@@ -55,6 +55,9 @@ struct RootView: View {
             DisableProtectionSheet(isPresented: $showsDisableProtection)
                 .environmentObject(store)
         }
+        .sheet(item: $store.pendingProtectedResourceChange) { change in
+            ProtectedResourceChangeSheet(change: change).environmentObject(store)
+        }
         .alert(
             "hidigFocus",
             isPresented: Binding(
@@ -265,6 +268,30 @@ struct PanelResizeHandle: View {
             .onHover { inside in (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set() }
             .onDisappear { NSCursor.arrow.set() }
             .accessibilityLabel("Изменить ширину панели")
+    }
+}
+
+private struct ProtectedResourceChangeSheet: View {
+    @EnvironmentObject private var store: AppStore
+    let change: ProtectedResourceChange
+    @State private var confirmation = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SectionEyebrow(text: "Необратимое действие")
+            Text(change.title).hidigFont(size: 28, weight: .bold, design: .rounded)
+            Text("Серия защиты — \(store.disciplineStreak) дней — и текущие серии привычек обнулятся. Защита останется включённой, привычки и история отметок сохранятся.")
+                .foregroundStyle(HidigPalette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Введите ПОДТВЕРДИТЬ").hidigFont(size: 12, weight: .semibold)
+            TextField("ПОДТВЕРДИТЬ", text: $confirmation).textFieldStyle(HidigTextFieldStyle())
+            HStack {
+                Button("Отмена") { store.pendingProtectedResourceChange = nil }.buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                Button("Обнулить серии и подтвердить") {
+                    do { _ = try store.confirmProtectedResourceChange(confirmation) }
+                    catch { store.errorMessage = error.localizedDescription }
+                }.buttonStyle(PrimaryButtonStyle()).disabled(confirmation != "ПОДТВЕРДИТЬ")
+            }
+        }.padding(30).frame(width: 480).foregroundStyle(HidigPalette.forest).background(HidigPalette.canvas)
     }
 }
 

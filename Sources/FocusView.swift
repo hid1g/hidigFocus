@@ -125,7 +125,6 @@ struct FocusView: View {
                     TextField("5", text: $breakDraft).textFieldStyle(HidigTextFieldStyle()).accessibilityLabel("Минуты отдыха")
                 }
             }
-            Text("От 1 до 999 минут").hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
             Button("Применить") {
                 if let work = Int(workDraft), let rest = Int(breakDraft),
                    store.setFocusDurations(workMinutes: work, breakMinutes: rest) { editingDurations = false }

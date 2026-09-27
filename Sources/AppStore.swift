@@ -13,6 +13,7 @@ final class AppStore: NSObject, ObservableObject {
     @Published var journalTitleDraft = ""
     @Published var selectedGroupID: UUID?
     @Published var selectedTaskID: UUID?
+    @Published var pendingProtectedResourceChange: ProtectedResourceChange?
     @Published var taskSidebarSelection: TaskSidebarSelection = .today
     let planner: PlannerWorkspace
     let reminderService = TaskReminderService()
@@ -569,6 +570,13 @@ final class AppStore: NSObject, ObservableObject {
             errorMessage = "Должна остаться хотя бы одна группа."
             return
         }
+        if state.groups.first(where: { $0.id == id })?.resources.contains(where: { $0.kind == .domain }) == true {
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .removeGroup)
+            return
+        }
+        removeGroupImmediately(id)
+    }
+    private func removeGroupImmediately(_ id: UUID) {
         state.groups.removeAll { $0.id == id }
         state.pendingGroupRules?.removeValue(forKey: id)
         if selectedGroupID == id { selectedGroupID = state.groups.first?.id }
@@ -587,7 +595,16 @@ final class AppStore: NSObject, ObservableObject {
     func hasPendingGroupRule(_ id: UUID) -> Bool { state.pendingGroupRules?[id] != nil }
     func applyGroupRule(_ id: UUID) {
         guard let draft = state.pendingGroupRules?[id], let index = state.groups.firstIndex(where: { $0.id == id }) else { return }
+        if domainCoverageChanged(from: state.groups[index], to: draft) {
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .applyGroupRule)
+            return
+        }
         state.groups[index] = draft; state.pendingGroupRules?.removeValue(forKey: id); saveAndApply()
+    }
+    private func domainCoverageChanged(from original: BlockGroup, to proposed: BlockGroup) -> Bool {
+        original.resources.contains { resource in
+            resource.kind == .domain && !proposed.resources.contains(where: { $0.id == resource.id && $0.identifier == resource.identifier })
+        }
     }
     func discardGroupRule(_ id: UUID) { state.pendingGroupRules?.removeValue(forKey: id); save() }
     func groupStatusExplanation(_ id: UUID) -> String {
@@ -607,6 +624,10 @@ final class AppStore: NSObject, ObservableObject {
     func setGroupUsesAllTasks(_ id: UUID, value: Bool) { editGroup(id) { $0.requiresAllTodayTasks = value; if value { $0.requiredTaskIDs.removeAll() } } }
     func setGroupEnabled(_ id: UUID, value: Bool) {
         guard let index = state.groups.firstIndex(where: { $0.id == id }) else { return }
+        if value, let draft = state.pendingGroupRules?[id], domainCoverageChanged(from: state.groups[index], to: draft) {
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .applyGroupRule)
+            return
+        }
         if value, let draft = state.pendingGroupRules?[id] { state.groups[index] = draft }
         state.pendingGroupRules?.removeValue(forKey: id)
         state.groups[index].isEnabled = value; saveAndApply()
@@ -642,10 +663,25 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func removeResource(_ resourceID: UUID, from groupID: UUID) {
+        if state.groups.first(where: { $0.id == groupID })?.resources.contains(where: { $0.id == resourceID && $0.kind == .domain }) == true {
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: groupID, operation: .remove(resourceID))
+            return
+        }
         editGroup(groupID) { $0.resources.removeAll { $0.id == resourceID } }
     }
 
     func updateResource(_ resourceID: UUID, in groupID: UUID, displayName rawName: String, identifier rawIdentifier: String) throws {
+        guard let group = groups.first(where: { $0.id == groupID }),
+              let existing = group.resources.first(where: { $0.id == resourceID }) else { return }
+        let proposed = existing.kind == .domain ? LocalRulesServer.normalizedDomain(rawIdentifier) : rawIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        if existing.kind == .domain {
+            guard proposed.contains("."), !proposed.contains(" ") else { throw AppError.invalidDomain }
+            guard !group.resources.contains(where: { $0.id != resourceID && $0.kind == .domain && $0.identifier == proposed }) else { throw AppError.duplicateResource }
+            if let committed = state.groups.first(where: { $0.id == groupID })?.resources.first(where: { $0.id == resourceID }), committed.identifier != proposed {
+                pendingProtectedResourceChange = ProtectedResourceChange(groupID: groupID, operation: .update(resourceID, rawName, proposed))
+                return
+            }
+        }
         try editGroup(groupID) { group in
             guard let resourceIndex = group.resources.firstIndex(where: { $0.id == resourceID }) else { return }
             let existing = group.resources[resourceIndex]
@@ -663,6 +699,46 @@ final class AppStore: NSObject, ObservableObject {
             group.resources[resourceIndex].displayName = name.isEmpty ? identifier : name
             group.resources[resourceIndex].identifier = identifier
         }
+    }
+
+    /// Apply only after explicit confirmation; keep protection and all unrelated rules enabled.
+    @discardableResult
+    func confirmProtectedResourceChange(_ confirmation: String) throws -> Bool {
+        guard confirmation == "ПОДТВЕРДИТЬ", let change = pendingProtectedResourceChange,
+              let index = state.groups.firstIndex(where: { $0.id == change.groupID }) else { return false }
+        switch change.operation {
+        case .update(let resourceID, let rawName, let identifier):
+            guard let resourceIndex = state.groups[index].resources.firstIndex(where: { $0.id == resourceID }) else { return false }
+            let effective = state.pendingGroupRules?[change.groupID] ?? state.groups[index]
+            guard !effective.resources.contains(where: { $0.id != resourceID && $0.kind == .domain && $0.identifier == identifier }) else { throw AppError.duplicateResource }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            state.groups[index].resources[resourceIndex].identifier = identifier
+            state.groups[index].resources[resourceIndex].displayName = name.isEmpty ? identifier : name
+            if var draft = state.pendingGroupRules?[change.groupID], let draftIndex = draft.resources.firstIndex(where: { $0.id == resourceID }) {
+                draft.resources[draftIndex] = state.groups[index].resources[resourceIndex]
+                state.pendingGroupRules?[change.groupID] = draft
+            }
+        case .remove(let resourceID):
+            guard state.groups[index].resources.contains(where: { $0.id == resourceID }) else { return false }
+            state.groups[index].resources.removeAll { $0.id == resourceID }
+            if var draft = state.pendingGroupRules?[change.groupID] {
+                draft.resources.removeAll { $0.id == resourceID }; state.pendingGroupRules?[change.groupID] = draft
+            }
+        case .removeGroup:
+            guard state.groups.count > 1 else { return false }
+            state.groups.remove(at: index); state.pendingGroupRules?.removeValue(forKey: change.groupID)
+            if selectedGroupID == change.groupID { selectedGroupID = state.groups.first?.id }
+        case .applyGroupRule:
+            guard let draft = state.pendingGroupRules?[change.groupID] else { return false }
+            state.groups[index] = draft; state.pendingGroupRules?.removeValue(forKey: change.groupID)
+        }
+        state.disciplineStreak = 0
+        state.disciplineLastCountedDayKey = DayKey.make(from: Date())
+        for index in state.habits.indices { state.habits[index].resetCurrentStreak() }
+        appendEvent(.taskSync, "Подтверждено изменение заблокированных доменов. Серия защиты и текущие серии привычек обнулены.")
+        pendingProtectedResourceChange = nil
+        saveAndApply()
+        return true
     }
 
 
