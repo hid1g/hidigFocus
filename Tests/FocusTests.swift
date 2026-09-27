@@ -2,6 +2,29 @@ import XCTest
 @testable import hidigFocus
 
 final class FocusTests: XCTestCase {
+    @MainActor func testDurationPresetsCustomPersistenceAndActiveSessionProtection() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repository = AppStateRepository(applicationSupportDirectory: dir)
+        let store = AppStore(repository: repository, startServices: false)
+        for (work, rest) in [(25, 5), (30, 5), (45, 10), (50, 10), (60, 15), (37, 8)] {
+            XCTAssertTrue(store.setFocusDurations(workMinutes: work, breakMinutes: rest))
+            store.startFocus()
+            XCTAssertEqual(store.activePomodoro?.targetSeconds, work * 60)
+            XCTAssertFalse(store.setFocusDurations(workMinutes: 20, breakMinutes: 4))
+            XCTAssertEqual(store.activePomodoro?.targetSeconds, work * 60)
+            store.finishPomodoro(completed: false)
+            store.startFocus(phase: .shortBreak)
+            XCTAssertEqual(store.activePomodoro?.targetSeconds, rest * 60)
+            store.finishPomodoro(completed: false)
+        }
+        XCTAssertFalse(store.setFocusDurations(workMinutes: 0, breakMinutes: 5))
+        XCTAssertFalse(store.setFocusDurations(workMinutes: 25, breakMinutes: -1))
+        store.flushPendingWrites()
+        let loaded = try repository.load()
+        XCTAssertEqual(loaded.taskSettings.workMinutes, 37)
+        XCTAssertEqual(loaded.taskSettings.shortBreakMinutes, 8)
+    }
     func testFreeFocusPauseResumeAndPersistence() throws {
         var state = PersistedAppState()
         let start = Date(timeIntervalSince1970: 1_800_000_000)

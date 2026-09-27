@@ -839,6 +839,14 @@ final class AppStore: NSObject, ObservableObject {
     func startFocus(taskID: UUID? = nil, phase: PomodoroPhase = .work, stopwatch: Bool = false) {
         if TaskEngine.startFocus(taskID: taskID, phase: phase, stopwatch: stopwatch, in: &state) { save() }
     }
+    @discardableResult
+    func setFocusDurations(workMinutes: Int, breakMinutes: Int) -> Bool {
+        guard activePomodoro == nil, (1...999).contains(workMinutes), (1...999).contains(breakMinutes) else { return false }
+        state.taskSettings.workMinutes = workMinutes
+        state.taskSettings.shortBreakMinutes = breakMinutes
+        save()
+        return true
+    }
     func checkFocusCompletion(now: Date = Date()) {
         guard let active = state.activePomodoro, active.pausedAt == nil, active.isStopwatch != true,
               TaskEngine.focusElapsed(active, now: now) >= active.targetSeconds else { return }

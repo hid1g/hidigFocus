@@ -11,6 +11,9 @@ struct FocusView: View {
     @State private var stopwatch = false
     @State private var selectingTask = false
     @State private var taskSearch = ""
+    @State private var editingDurations = false
+    @State private var workDraft = ""
+    @State private var breakDraft = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -32,6 +35,7 @@ struct FocusView: View {
                     }.foregroundStyle(HidigPalette.secondary)
                 }.buttonStyle(.plain).disabled(store.activePomodoro != nil)
                     .popover(isPresented: $selectingTask) { taskSelector }
+                HStack(spacing: 12) {
                 Menu {
                     Button("Фокус") { phase = .work }
                     Button("Перерыв") { phase = .shortBreak }
@@ -44,6 +48,20 @@ struct FocusView: View {
                         .background(HidigPalette.surfaceRaised).clipShape(Capsule())
                 }.menuStyle(.borderlessButton).fixedSize().disabled(store.activePomodoro != nil)
                     .accessibilityLabel("Интервал")
+                if !stopwatch && store.activePomodoro?.isStopwatch != true {
+                    Button {
+                        workDraft = String(store.state.taskSettings.workMinutes)
+                        breakDraft = String(store.state.taskSettings.shortBreakMinutes)
+                        editingDurations = true
+                    } label: {
+                        Label("\(store.state.taskSettings.workMinutes) / \(store.state.taskSettings.shortBreakMinutes) мин", systemImage: "clock")
+                            .hidigFont(size: 12).padding(.vertical, 9).padding(.horizontal, 10)
+                            .background(HidigPalette.surfaceRaised).clipShape(Capsule())
+                    }.buttonStyle(.plain).disabled(store.activePomodoro != nil)
+                        .accessibilityLabel("Время фокуса и отдыха")
+                        .popover(isPresented: $editingDurations) { durationEditor }
+                }
+                }
                 FocusClock(active: store.activePomodoro, seconds: idleSeconds, stopwatch: stopwatch, compact: compact)
                 HStack(spacing: 12) {
                     if let active = store.activePomodoro {
@@ -83,6 +101,40 @@ struct FocusView: View {
         case .shortBreak: return "Перерыв"
         case .longBreak: return "Длинный перерыв"
         }
+    }
+    private var durationEditor: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Фокус и отдых").hidigFont(size: 17, weight: .semibold)
+            Text("Фокус / отдых, минуты").hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach([25, 30, 45, 50, 60], id: \.self) { minutes in
+                    let rest = minutes <= 30 ? 5 : (minutes < 60 ? 10 : 15)
+                    Button("\(minutes) / \(rest)") {
+                        if store.setFocusDurations(workMinutes: minutes, breakMinutes: rest) { editingDurations = false }
+                    }.buttonStyle(SecondaryButtonStyle()).frame(maxWidth: .infinity)
+                }
+            }
+            Divider()
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Фокус, мин").hidigFont(size: 12)
+                    TextField("25", text: $workDraft).textFieldStyle(HidigTextFieldStyle()).accessibilityLabel("Минуты фокуса")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Отдых, мин").hidigFont(size: 12)
+                    TextField("5", text: $breakDraft).textFieldStyle(HidigTextFieldStyle()).accessibilityLabel("Минуты отдыха")
+                }
+            }
+            Text("От 1 до 999 минут").hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            Button("Применить") {
+                if let work = Int(workDraft), let rest = Int(breakDraft),
+                   store.setFocusDurations(workMinutes: work, breakMinutes: rest) { editingDurations = false }
+            }.buttonStyle(PrimaryButtonStyle()).disabled(!validDurations)
+        }.padding(18).frame(width: 310).foregroundStyle(HidigPalette.forest).background(HidigPalette.surface)
+    }
+    private var validDurations: Bool {
+        guard let work = Int(workDraft), let rest = Int(breakDraft) else { return false }
+        return (1...999).contains(work) && (1...999).contains(rest)
     }
     private var taskSelector: some View {
         VStack(spacing: 10) {
