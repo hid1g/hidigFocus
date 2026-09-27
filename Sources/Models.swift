@@ -13,7 +13,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case journal
     case settings
 
-    static let allCases: [AppSection] = [.tasks, .calendar, .pomodoro, .groups, .habits, .statistics, .journal, .tickTick, .settings]
+    static let allCases: [AppSection] = [.calendar, .tasks, .pomodoro, .groups, .habits, .statistics, .journal, .tickTick, .settings]
 
     var id: String { rawValue }
 

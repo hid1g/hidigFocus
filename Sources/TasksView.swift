@@ -470,10 +470,10 @@ private struct PlannerCardHost: View {
                     TaskDetailView(task: task, showsDetails: $showsDetails, cardSize: placement.size).id(id)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .shadow(color: .black.opacity(0.16), radius: 18, y: 5)
+                        .background(TaskCardEscapeMonitor { store.selectedTaskID = nil })
                         .position(x: placement.midX, y: placement.midY)
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("Карточка задачи")
-                        .background(TaskCardEscapeMonitor { store.selectedTaskID = nil })
                 }.frame(width: geometry.size.width, height: geometry.size.height)
                     .onAppear { lastRect = rect }
                     .onChange(of: rect) { if anchors[id] != nil { lastRect = $0 } }
@@ -617,6 +617,8 @@ private struct CalendarSlidingStrip<Content: View>: View {
         content
             .offset(x: pan.offset - columnWidth * CGFloat(leadingColumns))
             .frame(width: visibleWidth, alignment: .leading)
+            // Clipping pixels alone leaves neighboring days able to intercept sidebar clicks.
+            .contentShape(Rectangle())
             .clipped()
     }
 }

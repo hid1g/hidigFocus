@@ -3,8 +3,8 @@ import XCTest
 
 final class ModelTests: XCTestCase {
     func testPlannerAndFocusSectionsAreBeforeGroups() {
-        XCTAssertEqual(AppSection.allCases.first, .tasks)
-        XCTAssertEqual(Array(AppSection.allCases.prefix(4)), [.tasks, .calendar, .pomodoro, .groups])
+        XCTAssertEqual(AppSection.allCases.first, .calendar)
+        XCTAssertEqual(Array(AppSection.allCases.prefix(4)), [.calendar, .tasks, .pomodoro, .groups])
     }
 
     func testThemeSelectionKeepsLegacyPreferencesAndDistinctModes() {
