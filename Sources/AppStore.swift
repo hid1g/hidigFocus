@@ -1222,7 +1222,7 @@ final class AppStore: NSObject, ObservableObject {
         pendingJournalValue = nil
         journalWriter.async { [journalRepository, weak self] in
             let result = Result { try journalRepository.write(value, to: entry) }
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self, revision == self.journalRevision, self.selectedJournalEntry?.id == entry.id else { return }
                 switch result {
                 case .success: self.journalSaveState = .saved(Date())
