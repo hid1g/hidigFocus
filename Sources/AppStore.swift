@@ -136,6 +136,8 @@ final class AppStore: NSObject, ObservableObject {
         return local + tickTick
     }
     var groups: [BlockGroup] { state.groups.map { state.pendingGroupRules?[$0.id] ?? $0 } }
+    /// Access indicators use the applied rule; the editor may contain an unapplied draft.
+    func appliedGroup(_ id: UUID) -> BlockGroup? { state.groups.first { $0.id == id } }
     var habits: [Habit] { state.habits }
     var habitsDueToday: [Habit] {
         state.habits.enumerated()

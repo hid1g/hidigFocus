@@ -59,12 +59,14 @@ struct GroupsView: View {
     private var groupsList: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(store.groups) { group in
+                let applied = store.appliedGroup(group.id) ?? group
                 Button {
                     store.selectedGroupID = group.id
                 } label: {
                     HStack(spacing: 11) {
-                        Image(systemName: store.groupIsUnlocked(group) ? "lock.open" : "lock")
+                        Image(systemName: store.groupIsUnlocked(applied) ? "lock.open" : "lock")
                             .frame(width: 17)
+                            .accessibilityLabel(store.groupIsUnlocked(applied) ? "Ресурсы доступны" : "Ресурсы заблокированы")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(group.name).lineLimit(1)
                             Text(RussianPluralizer.phrase(group.resources.count, one: "ресурс", few: "ресурса", many: "ресурсов"))
@@ -96,15 +98,16 @@ struct GroupsView: View {
     }
 
     private func groupEditor(_ group: BlockGroup) -> some View {
-        ScrollView {
+        let applied = store.appliedGroup(group.id) ?? group
+        return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(group.name)
                             .hidigFont(size: 24, weight: .bold, design: .rounded)
                             .foregroundStyle(HidigPalette.forest)
-                        Text(group.isEnabled
-                            ? (store.groupIsUnlocked(group) ? "Сейчас открыта" : "Сейчас закрыта")
+                        Text(applied.isEnabled
+                            ? (store.groupIsUnlocked(applied) ? "Сейчас открыта" : "Сейчас закрыта")
                             : "Черновик — правило не применяется")
                             .hidigFont(size: 12, weight: .semibold)
                             .foregroundStyle(HidigPalette.secondary)

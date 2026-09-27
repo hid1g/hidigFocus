@@ -2,7 +2,7 @@ import XCTest
 @testable import hidigFocus
 
 final class ResourceProtectionTests: XCTestCase {
-    @MainActor private func makeStore(legacyDraft: Bool = false) throws -> (AppStore, URL, UUID, UUID) {
+    @MainActor private func makeStore(legacyDraft: Bool = false, disabledDraft: Bool = false) throws -> (AppStore, URL, UUID, UUID) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let resource = BlockedResource(kind: .domain, displayName: "Video", identifier: "video.example")
         let group = BlockGroup(name: "Sites", resources: [resource])
@@ -14,6 +14,10 @@ final class ResourceProtectionTests: XCTestCase {
         state.habits = [Habit(name: "Habit", checkInDayKeys: [DayKey.make(from: Date()), DayKey.make(from: yesterday)])]
         if legacyDraft {
             var draft = group; draft.resources[0].identifier = "different.example"
+            state.pendingGroupRules = [group.id: draft]
+        }
+        if disabledDraft {
+            var draft = group; draft.isEnabled = false
             state.pendingGroupRules = [group.id: draft]
         }
         let repository = AppStateRepository(applicationSupportDirectory: dir)
@@ -78,5 +82,17 @@ final class ResourceProtectionTests: XCTestCase {
         XCTAssertTrue(try store.confirmProtectedResourceChange("ПОДТВЕРДИТЬ"))
         XCTAssertEqual(store.state.groups[0].resources[0].identifier, "different.example")
         XCTAssertEqual(store.disciplineStreak, 0)
+    }
+    @MainActor func testAccessIndicatorUsesAppliedRuleUntilDraftIsApplied() throws {
+        let (store, dir, groupID, _) = try makeStore(disabledDraft: true)
+        defer { store.flushPendingWrites(); try? FileManager.default.removeItem(at: dir) }
+        let draft = try XCTUnwrap(store.groups.first { $0.id == groupID })
+        XCTAssertTrue(store.groupIsUnlocked(draft))
+        XCTAssertFalse(store.groupIsUnlocked(try XCTUnwrap(store.appliedGroup(groupID))))
+        XCTAssertTrue(store.groupStatusExplanation(groupID).hasPrefix("Закрыта"))
+        XCTAssertEqual(store.disciplineStreak, 17)
+        store.applyGroupRule(groupID)
+        XCTAssertTrue(store.groupIsUnlocked(try XCTUnwrap(store.appliedGroup(groupID))))
+        XCTAssertEqual(store.disciplineStreak, 17)
     }
 }
