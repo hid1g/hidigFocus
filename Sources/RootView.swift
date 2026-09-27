@@ -6,6 +6,7 @@ struct RootView: View {
     @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.ocean.rawValue
     @AppStorage(HidigSettingsKeys.customSidebarColor) private var customSidebarColorHex = "#E5EFDA"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsDisableProtection = false
     @AppStorage("navigationCollapsed") private var navigationCollapsed = true
     @AppStorage("navigationWidth") private var navigationWidth = 240.0
@@ -40,27 +41,15 @@ struct RootView: View {
                 PanelResizeHandle(width: $navigationWidth, bounds: 224...320)
             }
 
-            Group {
-                switch store.selectedSection {
-                case .today: TodayView()
-                case .tasks: TasksView()
-                case .groups: GroupsView()
-                case .habits: HabitsView()
-                case .statistics: StatisticsView()
-                case .tickTick: TickTickView()
-                case .journal: JournalView()
-                case .settings: SettingsView()
-                }
-            }
-            .id(store.selectedSection)
-            .transition(.opacity.combined(with: .scale(scale: 0.995)))
-            .animation(.easeInOut(duration: 0.22), value: store.selectedSection)
+            sectionView(store.selectedSection)
+            .transition(.opacity)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: store.selectedSection)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(HidigPalette.canvas)
         }
         .contentShape(Rectangle())
         .simultaneousGesture(navigationGesture)
-        .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.92), value: navigationCollapsed)
+        .animation(reduceMotion ? nil : .interactiveSpring(response: 0.32, dampingFraction: 0.92), value: navigationCollapsed)
         .ignoresSafeArea()
         .sheet(isPresented: $showsDisableProtection) {
             DisableProtectionSheet(isPresented: $showsDisableProtection)
@@ -85,6 +74,21 @@ struct RootView: View {
         }
         .onAppear {
             navigationWidth = resolvedNavigationWidth
+        }
+    }
+
+    @ViewBuilder private func sectionView(_ section: AppSection) -> some View {
+        switch section {
+        case .today: TodayView()
+        case .tasks: TasksView()
+        case .calendar: TasksView().onAppear { store.planner.presentation = .calendar }
+        case .pomodoro: FocusView()
+        case .groups: GroupsView()
+        case .habits: HabitsView()
+        case .statistics: StatisticsView()
+        case .tickTick: TickTickView()
+        case .journal: JournalView()
+        case .settings: SettingsView()
         }
     }
 
@@ -209,7 +213,11 @@ private struct SidebarButton: View {
 
     var body: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.22)) { store.selectedSection = section }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                if section == .tasks { store.planner.presentation = .list }
+                if section == .calendar { store.planner.presentation = .calendar }
+                store.selectedSection = section
+            }
         } label: {
             HStack(spacing: 11) {
                 Image(systemName: section.systemImage).frame(width: 18)

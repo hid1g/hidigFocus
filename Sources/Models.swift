@@ -3,6 +3,8 @@ import SwiftUI
 
 enum AppSection: String, CaseIterable, Identifiable {
     case today
+    case calendar
+    case pomodoro
     case tasks
     case groups
     case habits
@@ -11,12 +13,14 @@ enum AppSection: String, CaseIterable, Identifiable {
     case journal
     case settings
 
-    static let allCases: [AppSection] = [.tasks, .groups, .habits, .statistics, .journal, .tickTick, .settings]
+    static let allCases: [AppSection] = [.tasks, .calendar, .pomodoro, .groups, .habits, .statistics, .journal, .tickTick, .settings]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .calendar: return "Календарь"
+        case .pomodoro: return "Помодоро"
         case .today: return "Сегодня"
         case .tasks: return "Задачи"
         case .groups: return "Группы"
@@ -30,6 +34,8 @@ enum AppSection: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .calendar: return "calendar"
+        case .pomodoro: return "timer"
         case .today: return "sun.max"
         case .tasks: return "checklist"
         case .groups: return "shield"
@@ -596,9 +602,10 @@ enum JournalSaveState: Equatable {
 }
 
 struct PersistedAppState: Codable {
-    var schemaVersion = 2
+    var schemaVersion = 3
     var protectionEnabled = true
     var groups: [BlockGroup] = [.entertainment]
+    var pendingGroupRules: [UUID: BlockGroup]?
     var habits: [Habit] = [Habit(name: "Медитация")]
     var cachedTasks: [TickTickTask] = []
     var localTasks: [FocusTask] = []
@@ -613,14 +620,16 @@ struct PersistedAppState: Codable {
     var activePomodoro: ActivePomodoro?
     var taskSettings = TaskSettings()
     var taskImportHistory: [TaskImportReport] = []
+    var tickTickHierarchyVersion: Int?
     var lastPlannerSyncAt: Date?
     var googleCalendarConnection = GoogleCalendarConnection()
 
     private enum CodingKeys: String, CodingKey {
+        case pendingGroupRules
         case schemaVersion, protectionEnabled, groups, habits, cachedTasks, localTasks, lastSuccessfulSync, events
         case disciplineStreak, disciplineLastCountedDayKey
         case taskFolders, taskLists, managedTasks, pomodoroSessions, activePomodoro, taskSettings
-        case taskImportHistory, googleCalendarConnection, lastPlannerSyncAt
+        case taskImportHistory, googleCalendarConnection, lastPlannerSyncAt, tickTickHierarchyVersion
     }
 
     init() {}
@@ -630,6 +639,7 @@ struct PersistedAppState: Codable {
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         protectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .protectionEnabled) ?? true
         groups = try container.decodeIfPresent([BlockGroup].self, forKey: .groups) ?? [.entertainment]
+        pendingGroupRules = try container.decodeIfPresent([UUID: BlockGroup].self, forKey: .pendingGroupRules)
         habits = try container.decodeIfPresent([Habit].self, forKey: .habits) ?? [Habit(name: "Медитация")]
         cachedTasks = try container.decodeIfPresent([TickTickTask].self, forKey: .cachedTasks) ?? []
         localTasks = try container.decodeIfPresent([FocusTask].self, forKey: .localTasks) ?? []
@@ -645,9 +655,10 @@ struct PersistedAppState: Codable {
         activePomodoro = try container.decodeIfPresent(ActivePomodoro.self, forKey: .activePomodoro)
         taskSettings = try container.decodeIfPresent(TaskSettings.self, forKey: .taskSettings) ?? TaskSettings()
         taskImportHistory = try container.decodeIfPresent([TaskImportReport].self, forKey: .taskImportHistory) ?? []
+        tickTickHierarchyVersion = try container.decodeIfPresent(Int.self, forKey: .tickTickHierarchyVersion)
         lastPlannerSyncAt = try container.decodeIfPresent(Date.self, forKey: .lastPlannerSyncAt)
         googleCalendarConnection = try container.decodeIfPresent(GoogleCalendarConnection.self, forKey: .googleCalendarConnection) ?? GoogleCalendarConnection()
-        schemaVersion = 2
+        // Schema upgrades run in the repository after a verified backup.
     }
 }
 

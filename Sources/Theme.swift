@@ -100,6 +100,7 @@ struct HidigMenuPicker: View {
     @Binding var selection: String
     var leadingIcon: String? = nil
     var maxListHeight: CGFloat = 280
+    var compact = false
     @State private var isPresented = false
 
     private var selected: HidigMenuOption? {
@@ -119,11 +120,11 @@ struct HidigMenuPicker: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(HidigPalette.secondary)
             }
-            .hidigFont(size: 11, weight: .semibold)
-            .padding(.horizontal, 11)
-            .frame(minHeight: 34)
-            .background(HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .hidigFont(size: compact ? 12 : 11, weight: compact ? .regular : .semibold)
+            .padding(.horizontal, compact ? 6 : 11)
+            .frame(minHeight: compact ? 28 : 34)
+            .background(compact ? Color.clear : HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
             .clipShape(RoundedRectangle(cornerRadius: 9))
             .contentShape(Rectangle())
         }
@@ -167,6 +168,7 @@ struct HidigMenuPicker: View {
 
 struct HidigDateButton: View {
     @Binding var date: Date
+    var compact = false
     @State private var isPresented = false
 
     var body: some View {
@@ -176,11 +178,11 @@ struct HidigDateButton: View {
                 Text(date.formatted(.dateTime.day().month(.twoDigits).year()))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .hidigFont(size: 11, weight: .semibold)
+            .hidigFont(size: 12, weight: .medium)
             .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .frame(height: compact ? 28 : 34)
+            .background(compact ? HidigPalette.hover.opacity(0.45) : HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
             .clipShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
@@ -198,29 +200,42 @@ struct HidigDateButton: View {
 struct HidigTimeButton: View {
     @Binding var date: Date
     var stepMinutes = 30
+    var compact = false
     @State private var isPresented = false
 
+    @State private var exactTime = ""
+    @State private var invalidTime = false
     private var selectedMinute: Int {
-        Calendar.current.component(.hour, from: date) * 60 + Calendar.current.component(.minute, from: date)
+        PlannerCalendar.current.component(.hour, from: date) * 60 + PlannerCalendar.current.component(.minute, from: date)
     }
 
     var body: some View {
         Button { isPresented.toggle() } label: {
             HStack(spacing: 7) {
                 Image(systemName: "clock")
-                Text(date.formatted(date: .omitted, time: .shortened))
+                Text(PlannerCalendar.time(date))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .hidigFont(size: 11, weight: .semibold)
+            .hidigFont(size: 12, weight: .medium)
             .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(HidigPalette.line))
+            .frame(height: compact ? 28 : 34)
+            .background(compact ? HidigPalette.hover.opacity(0.45) : HidigPalette.surfaceRaised)
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
             .clipShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isPresented, arrowEdge: .top) {
-            ScrollViewReader { reader in
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("ЧЧ:ММ", text: $exactTime)
+                        .textFieldStyle(HidigTextFieldStyle())
+                        .onSubmit(applyExactTime)
+                        .accessibilityLabel("Точное время, часы и минуты")
+                    Button(action: applyExactTime) { Image(systemName: "checkmark") }
+                        .buttonStyle(.plain).help("Применить время")
+                }.padding(.horizontal, 10).padding(.top, 10)
+                if invalidTime { Text("Введите время от 00:00 до 23:59").font(.caption).foregroundStyle(HidigPalette.warning) }
+                ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(spacing: 3) {
                         ForEach(Array(stride(from: 0, to: 24 * 60, by: stepMinutes)), id: \.self) { minute in
@@ -231,14 +246,14 @@ struct HidigTimeButton: View {
                                 HStack {
                                     Text(timeLabel(minute))
                                     Spacer()
-                                    if abs(selectedMinute - minute) < stepMinutes {
+                                    if selectedMinute == minute {
                                         Image(systemName: "checkmark").foregroundStyle(HidigPalette.controlFill)
                                     }
                                 }
-                                .hidigFont(size: 12, weight: abs(selectedMinute - minute) < stepMinutes ? .semibold : .regular)
+                                .hidigFont(size: 12, weight: selectedMinute == minute ? .semibold : .regular)
                                 .padding(.horizontal, 12)
                                 .frame(height: 35)
-                                .background(abs(selectedMinute - minute) < stepMinutes ? HidigPalette.lettuce.opacity(0.55) : .clear)
+                                .background(selectedMinute == minute ? HidigPalette.lettuce.opacity(0.55) : .clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                                 .contentShape(Rectangle())
                             }
@@ -248,22 +263,27 @@ struct HidigTimeButton: View {
                     }
                     .padding(7)
                 }
-                .frame(width: 160, height: 270)
+                .frame(width: 190, height: 270)
                 .background(HidigPalette.surface)
-                .onAppear {
-                    reader.scrollTo((selectedMinute / stepMinutes) * stepMinutes, anchor: .center)
+                .onAppear { reader.scrollTo((selectedMinute / stepMinutes) * stepMinutes, anchor: .center) }
                 }
-            }
+            }.frame(width: 210).background(HidigPalette.surface)
+                .onAppear { exactTime = String(format: "%02d:%02d", selectedMinute / 60, selectedMinute % 60); invalidTime = false }
         }
     }
 
+    private func applyExactTime() {
+        guard let minute = PlannerTimeInput.minutes(exactTime) else { invalidTime = true; return }
+        setMinute(minute); isPresented = false
+    }
+
     private func setMinute(_ minute: Int) {
-        date = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date) ?? date
+        date = PlannerCalendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date) ?? date
     }
 
     private func timeLabel(_ minute: Int) -> String {
-        let value = Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
-        return value.formatted(date: .omitted, time: .shortened)
+        let value = PlannerCalendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
+        return PlannerCalendar.time(value)
     }
 }
 
@@ -491,10 +511,10 @@ struct HidigCheckmarkBox: View {
             .frame(width: size, height: size)
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: max(6, size * 0.28), style: .continuous)
+                RoundedRectangle(cornerRadius: max(4, size * 0.25), style: .continuous)
                     .stroke(border, lineWidth: isHovered ? 1.8 : 1.45)
             )
-            .clipShape(RoundedRectangle(cornerRadius: max(6, size * 0.28), style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: max(4, size * 0.25), style: .continuous))
             .opacity(isEnabled || isChecked ? 1 : 0.72)
             .animation(.easeOut(duration: 0.12), value: isChecked)
             .animation(.easeOut(duration: 0.12), value: isHovered)
@@ -502,12 +522,12 @@ struct HidigCheckmarkBox: View {
 
     private var background: Color {
         if isChecked { return HidigPalette.controlFill }
-        return isHovered && isEnabled ? HidigPalette.hover : HidigPalette.surfaceRaised
+        return isHovered && isEnabled ? HidigPalette.hover : .clear
     }
 
     private var border: Color {
         if isChecked { return HidigPalette.controlFill }
-        return isHovered && isEnabled ? HidigPalette.focusRing : HidigPalette.line
+        return isHovered && isEnabled ? HidigPalette.focusRing : HidigPalette.secondary.opacity(0.6)
     }
 }
 

@@ -3,7 +3,7 @@ import SwiftUI
 struct HabitsView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
-    @State private var weekOffset = 0
+    @AppStorage("habitWeekOffset") private var weekOffset = 0
     @State private var draggedHabitID: UUID?
     @State private var editorTarget: HabitEditorTarget?
 
@@ -64,6 +64,7 @@ struct HabitsView: View {
             .padding(.vertical, 36)
             .frame(maxWidth: 1100, alignment: .leading)
         }
+        .overlay(alignment: .bottomTrailing) { Button("Отменить отметку") { store.undoHabitCheck() }.disabled(!store.canUndoHabit).padding(12) }
         .sheet(item: $editorTarget) { target in
             HabitEditorSheet(target: target, isPresented: Binding(
                 get: { editorTarget != nil },
@@ -138,6 +139,7 @@ struct HabitsView: View {
                     isScheduled: scheduled,
                     action: { store.toggleHabit(habit.id, on: date) }
                 )
+                .help(editable ? "Отметку можно изменить за сегодня или вчера" : (scheduled ? "Эта дата недоступна для изменения" : "На этот день привычка не запланирована"))
                 .frame(width: 46)
             }
             VStack(spacing: 2) {

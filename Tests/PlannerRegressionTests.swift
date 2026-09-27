@@ -2,6 +2,72 @@ import XCTest
 @testable import hidigFocus
 
 final class PlannerRegressionTests: XCTestCase {
+    func testImportRestoresNestedHierarchyInAnyOrderWithoutReplacingLocalEdits() throws {
+        let projects = Data(#"[{"id":"p","name":"Project"}]"#.utf8)
+        let rows: [[String: Any]] = [
+            ["id":"leaf", "projectId":"p", "title":"Leaf", "parentId":"child", "status":2],
+            ["id":"child", "projectId":"p", "title":"Child", "parentId":"root", "status":0],
+            ["id":"root", "projectId":"p", "title":"Root", "childIds":["child"], "status":0]
+        ]
+        let snapshot = try TickTickCLIService().importSnapshot(projects: projects, rows: rows)
+        var state = PersistedAppState()
+        _ = TaskEngine.importTickTick(folders: [], lists: snapshot.lists, records: snapshot.records, into: &state)
+        let root = try XCTUnwrap(state.managedTasks.first { $0.sourceID == "root" })
+        let child = try XCTUnwrap(state.managedTasks.first { $0.sourceID == "child" })
+        let leaf = try XCTUnwrap(state.managedTasks.first { $0.sourceID == "leaf" })
+        XCTAssertEqual(child.parentTaskID, root.id)
+        XCTAssertEqual(leaf.parentTaskID, child.id)
+        XCTAssertEqual(leaf.status, .completed)
+        let index = try XCTUnwrap(state.managedTasks.firstIndex { $0.id == child.id })
+        state.managedTasks[index].title = "Local title"
+        _ = TaskEngine.importTickTick(folders: [], lists: snapshot.lists, records: snapshot.records.reversed(), into: &state)
+        XCTAssertEqual(state.managedTasks[index].title, "Local title")
+        XCTAssertEqual(state.managedTasks.count, 3)
+        let tree = PlannerTaskTree.rows(state.managedTasks)
+        XCTAssertEqual(tree.map(\.id), [root.id,child.id,leaf.id])
+        XCTAssertEqual(tree.map(\.depth), [0,1,2])
+        XCTAssertEqual(PlannerTaskTree.rows(state.managedTasks, collapsed: [root.id]).map(\.id), [root.id])
+        XCTAssertEqual(PlannerTaskTree.rows([leaf]).map(\.id), [leaf.id])
+    }
+
+    func testHierarchyResolvesMissingParentsLaterAndRejectsCycles() throws {
+        var state = PersistedAppState()
+        let child = TickTickImportRecord(sourceID: "child", projectSourceID: "p", title: "Child", parentSourceID: "root")
+        let root = TickTickImportRecord(sourceID: "root", projectSourceID: "p", title: "Root", childSourceIDs: ["child"])
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: [child], into: &state)
+        XCTAssertNil(state.managedTasks[0].parentTaskID)
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: [root], into: &state)
+        XCTAssertEqual(state.managedTasks[0].parentTaskID, state.managedTasks[1].id)
+        var cycle = PersistedAppState()
+        var cyclicRoot = root; cyclicRoot.parentSourceID = "child"
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: [child, cyclicRoot], into: &cycle)
+        XCTAssertTrue(cycle.managedTasks.allSatisfy { $0.parentTaskID == nil })
+    }
+
+    func testAbandonedSourceParentKeepsItsStatus() throws {
+        let snapshot = try TickTickCLIService().importSnapshot(projects: Data("[]".utf8), rows: [
+            ["id":"parent", "projectId":"p", "title":"Parent", "status":-1],
+            ["id":"child", "projectId":"p", "title":"Child", "status":2, "parentId":"parent"]
+        ])
+        var state = PersistedAppState()
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: snapshot.records, into: &state)
+        XCTAssertEqual(state.managedTasks[0].status, .wontDo)
+        XCTAssertEqual(state.managedTasks[1].parentTaskID, state.managedTasks[0].id)
+    }
+
+    func testHierarchyUpgradeDoesNotReopenLocallyCompletedTasks() {
+        var state = PersistedAppState()
+        var remote = TickTickImportRecord(sourceID: "child", projectSourceID: "p", title: "Child", isCompleted: false)
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: [remote], into: &state)
+        state.managedTasks[0].status = .completed
+        remote.isAbandoned = false
+        remote.parentSourceID = "parent"
+        let parent = TickTickImportRecord(sourceID: "parent", projectSourceID: "p", title: "Parent")
+        _ = TaskEngine.importTickTick(folders: [], lists: [], records: [remote,parent], into: &state)
+        XCTAssertEqual(state.managedTasks[0].status, .completed)
+        XCTAssertEqual(state.managedTasks[0].parentTaskID, state.managedTasks[1].id)
+    }
+
     func testRemoteMoveClearedDatesAndLocalEditsReconcileWithoutDuplicates() throws {
         var state = PersistedAppState()
         let a = TaskList(name: "A", sourceID: "a")
@@ -85,12 +151,13 @@ final class PlannerRegressionTests: XCTestCase {
         XCTAssertEqual(result["second"]?.laneCount, 1)
     }
 
-    func testDraggingResetsOldDeadlineAndUnscheduledClearsDates() throws {
+    func testDraggingChangesPlannedIntervalAndUnscheduledClearsPlan() throws {
         var state = PersistedAppState()
         let id = try XCTUnwrap(TaskEngine.addTask(title: "Task", listID: TaskList.inboxID, to: &state))
         let date = Date(timeIntervalSince1970: 10000)
         TaskEngine.schedule(id, at: date, durationMinutes: 90, in: &state)
-        XCTAssertEqual(state.managedTasks[0].dueDate, date.addingTimeInterval(5400))
+        XCTAssertEqual(state.managedTasks[0].plannedEndDate, date.addingTimeInterval(5400))
+        XCTAssertNil(state.managedTasks[0].dueDate)
         TaskEngine.schedule(id, at: nil, in: &state)
         XCTAssertNil(state.managedTasks[0].startDate)
         XCTAssertNil(state.managedTasks[0].dueDate)

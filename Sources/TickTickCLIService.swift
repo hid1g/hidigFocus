@@ -91,7 +91,7 @@ struct TickTickCLIService {
             }
     }
 
-    func fullImportSnapshot(since: Date, through endDate: Date = Date(), calendar: Calendar = .current) async throws -> ImportSnapshot {
+    func fullImportSnapshot(since: Date, through endDate: Date = Date(), calendar: Calendar = .current, knownTaskSourceIDs: Set<String> = []) async throws -> ImportSnapshot {
         guard let executableURL = executableURL() else { throw TickTickCLIError.cliMissing }
         let projectsCommand = try await run(executableURL: executableURL, arguments: ["project", "list", "--json"])
         guard projectsCommand.status == 0 else { throw TickTickCLIError.commandFailed(projectsCommand.stderr) }
@@ -114,6 +114,20 @@ struct TickTickCLIService {
         let activeCommand = try await run(executableURL: executableURL, arguments: ["task", "filter", "--status", "0", "--json"])
         guard activeCommand.status == 0 else { throw TickTickCLIError.commandFailed(activeCommand.stderr) }
         rows.append(contentsOf: try objectRows(from: activeCommand.stdout, preferredKey: "tasks"))
+        var known = knownTaskSourceIDs.union(rows.compactMap { $0["id"] as? String })
+        var cursorIndex = 0
+        while cursorIndex < rows.count {
+            let row = rows[cursorIndex]; cursorIndex += 1
+            guard let parent = row["parentId"] as? String, !parent.isEmpty,
+                  let project = row["projectId"] as? String, known.insert(parent).inserted else { continue }
+            let command = try await run(executableURL: executableURL, arguments: ["task", "get", project, parent, "--json"])
+            guard command.status == 0 else { throw TickTickCLIError.commandFailed(command.stderr) }
+            let data = try JSONSerialization.jsonObject(with: command.stdout)
+            if var parentRow = data as? [String: Any], parentRow["id"] as? String == parent {
+                parentRow["_hidigHierarchyContext"] = true
+                rows.append(parentRow)
+            }
+        }
         return try importSnapshot(projects: projectsCommand.stdout, rows: rows)
     }
 
@@ -170,7 +184,7 @@ struct TickTickCLIService {
             preview: TaskImportPreview(
                 folders: 0,
                 lists: lists.count,
-                activeTasks: records.filter { !$0.completed }.count,
+                activeTasks: records.filter { !$0.completed && $0.isAbandoned != true }.count,
                 completedTasks: records.filter { $0.completed }.count
             )
         )
@@ -241,6 +255,9 @@ struct TickTickCLIService {
             sourceID: id,
             projectSourceID: projectID,
             title: title,
+            parentSourceID: (row["parentId"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            childSourceIDs: row["childIds"] as? [String],
+            isHierarchyContext: row["_hidigHierarchyContext"] as? Bool,
             description: row["desc"] as? String ?? "",
             notes: row["content"] as? String ?? "",
             startDate: start,
@@ -257,7 +274,8 @@ struct TickTickCLIService {
             plannedPomodoros: estimatedPomo,
             completedPomodoros: pomoCount,
             durationMinutes: duration.map { max(15, $0) } ?? (estimatedDuration > 0 ? max(15, estimatedDuration / 60) : 30),
-            isCompleted: (row["status"] as? NSNumber).map { $0.intValue == 2 }
+            isCompleted: (row["status"] as? NSNumber).map { $0.intValue == 2 },
+            isAbandoned: (row["status"] as? NSNumber).map { $0.intValue == -1 }
         )
     }
 

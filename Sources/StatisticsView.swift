@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatisticsView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
+    @State private var period = 7
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
@@ -13,12 +14,19 @@ struct StatisticsView: View {
                     subtitle: "Показатели строятся из локальной истории hidigFocus и подключённых источников задач."
                 )
 
+                Picker("Период", selection: $period) { Text("Сегодня").tag(1); Text("7 дней").tag(7); Text("30 дней").tag(30) }.pickerStyle(.segmented).frame(width: 320)
+                HStack(spacing: 14) {
+                    metric(value: "\(completedInPeriod)", label: "выполнено задач за период")
+                    metric(value: "\(habitChecksInPeriod)", label: "отметок привычек за период")
+                    metric(value: "\(focusMinutes)", label: "минут фокусировки за период")
+                }
+                Text("Задачи учитываются по дате выполнения; привычки — по дневным отметкам; фокус — по завершённым рабочим сессиям. Эти показатели не складываются.").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 14) {
                     metric(
                         value: "\(activeGroupCount)",
                         label: RussianPluralizer.form(activeGroupCount, one: "активная группа", few: "активные группы", many: "активных групп")
                     )
-                    metric(value: "\(store.completedTaskCount)/\(store.todayTasks.count)", label: "задач сегодня")
+                    metric(value: "\(store.completedTaskCount)/\(store.todayTasks.count)", label: "задач блокировки сегодня")
                     metric(value: "\(checkedHabitsToday)/\(store.habitsDueToday.count)", label: "привычек сегодня")
                     metric(
                         value: "\(store.disciplineStreak)",
@@ -63,6 +71,16 @@ struct StatisticsView: View {
             .frame(maxWidth: 1100, alignment: .leading)
         }
     }
+
+    private var periodStart: Date { Calendar.current.date(byAdding: .day, value: 1-period, to: Calendar.current.startOfDay(for: Date())) ?? Date() }
+    private var completedInPeriod: Int { store.state.managedTasks.filter { $0.status == .completed && ($0.completedAt ?? .distantPast) >= periodStart }.count }
+    private var habitChecksInPeriod: Int {
+        (0..<period).reduce(0) { sum, offset in
+            let date = Calendar.current.date(byAdding: .day, value: offset, to: periodStart) ?? periodStart
+            return sum + store.habits.filter { $0.isChecked(on: date) }.count
+        }
+    }
+    private var focusMinutes: Int { store.pomodoroSessions.filter { $0.phase == .work && $0.wasCompleted && $0.endedAt >= periodStart }.reduce(0) { $0 + $1.durationSeconds } / 60 }
 
     private func metric(value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {

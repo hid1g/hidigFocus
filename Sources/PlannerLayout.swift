@@ -4,7 +4,7 @@ extension TaskRepeatRule {
     var displayTitle: String {
         if weekdays == Set([2, 3, 4, 5, 6]) && interval == 1 { return "Каждый будний день" }
         let days = weekdays.sorted().filter { (1...7).contains($0) }
-            .map { Calendar.current.shortWeekdaySymbols[$0 - 1] }.joined(separator: ", ")
+            .map { PlannerCalendar.current.shortWeekdaySymbols[$0 - 1] }.joined(separator: ", ")
         let base = interval == 1 ? frequency.title : "\(frequency.title), интервал: \(interval)"
         return days.isEmpty ? base : "\(base) · \(days)"
     }
@@ -57,15 +57,24 @@ enum PlannerLayout {
 extension ManagedTask {
     var isOverdue: Bool {
         guard status == .active, let dueDate else { return false }
-        return dueDate < (isAllDay ? Calendar.current.startOfDay(for: Date()) : Date())
+        return dueDate < (isAllDay ? PlannerCalendar.current.startOfDay(for: Date()) : Date())
     }
 
     var scheduleLabel: String {
         guard let date = startDate ?? dueDate else { return "Без даты" }
         let day = date.formatted(date: .abbreviated, time: .omitted)
         if isAllDay { return "\(day) · весь день" }
-        let start = date.formatted(date: .omitted, time: .shortened)
-        let end = (calendarEndDate ?? dueDate)?.formatted(date: .omitted, time: .shortened)
+        let start = PlannerCalendar.time(date)
+        let end = (calendarEndDate ?? dueDate).map(PlannerCalendar.time)
         return "\(day) · \(start)\(end.map { "–\($0)" } ?? "")"
+    }
+}
+
+final class PlannerPlacementCache {
+    private var previous: [PlannerInterval] = []
+    private var value: [String: PlannerPlacement] = [:]
+    func placements(_ intervals: [PlannerInterval]) -> [String: PlannerPlacement] {
+        if intervals != previous { previous = intervals; value = PlannerLayout.placements(intervals) }
+        return value
     }
 }

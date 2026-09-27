@@ -67,11 +67,11 @@ final class TaskEngineTests: XCTestCase {
         _ = TaskEngine.addTask(title: "Сохраняется", listID: TaskList.inboxID, to: &state)
         try repository.save(state)
         let restored = try repository.load()
-        XCTAssertEqual(restored.schemaVersion, 2)
+        XCTAssertEqual(restored.schemaVersion, 3)
         XCTAssertEqual(restored.managedTasks.map(\.title), ["Сохраняется"])
 
         let legacy = try JSONDecoder().decode(PersistedAppState.self, from: Data("{}".utf8))
-        XCTAssertEqual(legacy.schemaVersion, 2)
+        XCTAssertEqual(legacy.schemaVersion, 1)
         XCTAssertEqual(legacy.taskLists.first?.id, TaskList.inboxID)
     }
 
@@ -82,6 +82,80 @@ final class TaskEngineTests: XCTestCase {
         let rule = TaskRepeatRule(frequency: .weekly, interval: 2)
         let next = try XCTUnwrap(TaskEngine.nextOccurrence(after: start, for: rule, calendar: calendar))
         XCTAssertEqual(calendar.dateComponents([.day], from: start, to: next).day, 14)
+    }
+
+    func testWeeklyRecurrenceUsesSelectedDaysAndInterval() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        calendar.firstWeekday = 2
+        let monday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 10)))
+        let rule = TaskRepeatRule(frequency: .weekly, interval: 2, weekdays: [2, 4])
+        let wednesday = try XCTUnwrap(TaskEngine.nextOccurrence(after: monday, for: rule, calendar: calendar))
+        XCTAssertEqual(calendar.component(.day, from: wednesday), 16)
+        let nextMonday = try XCTUnwrap(TaskEngine.nextOccurrence(after: wednesday, for: rule, calendar: calendar))
+        XCTAssertEqual(calendar.component(.day, from: nextMonday), 28)
+        XCTAssertEqual(calendar.component(.hour, from: nextMonday), 10)
+    }
+
+    func testRecurrenceEndIncludesEntireFinalDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let date = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 18)))
+        let end = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date)))
+        let rule = TaskRepeatRule(frequency: .daily, endDate: end)
+        let next = try XCTUnwrap(TaskEngine.nextOccurrence(after: date, for: rule, calendar: calendar))
+        XCTAssertEqual(calendar.component(.hour, from: next), 18)
+        XCTAssertNil(TaskEngine.nextOccurrence(after: next, for: rule, calendar: calendar))
+    }
+
+    func testCompletionCreatesOneSuccessorAndPreservesHistory() throws {
+        var state = PersistedAppState()
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let task = ManagedTask(title: "Повторение", startDate: date, durationMinutes: 45,
+                               repeatRule: TaskRepeatRule(frequency: .daily),
+                               checklist: [TaskChecklistItem(title: "Шаг", isCompleted: true)])
+        state.managedTasks = [task]
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        XCTAssertEqual(state.managedTasks.count, 2)
+        let next = try XCTUnwrap(state.managedTasks.first { $0.id != task.id })
+        XCTAssertEqual(next.status, .active)
+        XCTAssertEqual(next.startDate, Calendar.current.date(byAdding: .day, value: 1, to: date))
+        XCTAssertEqual(next.calendarEndDate?.timeIntervalSince(try XCTUnwrap(next.startDate)), 45 * 60)
+        XCTAssertFalse(try XCTUnwrap(next.checklist.first).isCompleted)
+        XCTAssertEqual(state.managedTasks[0].nextOccurrenceID, next.id)
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        TaskEngine.setCompleted(task.id, completed: false, in: &state)
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        XCTAssertEqual(state.managedTasks.count, 2)
+        let restored = try JSONDecoder().decode(ManagedTask.self, from: JSONEncoder().encode(state.managedTasks[0]))
+        XCTAssertEqual(restored.nextOccurrenceID, next.id)
+    }
+
+    func testImportedRepeatRemainsSourceControlled() {
+        var state = PersistedAppState()
+        let task = ManagedTask(title: "Импорт", startDate: Date(),
+                               repeatRule: TaskRepeatRule(frequency: .daily, sourceRule: "RRULE:FREQ=DAILY"))
+        state.managedTasks = [task]
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        XCTAssertEqual(state.managedTasks.count, 1)
+    }
+
+    func testCalendarMoveSnapsAbsoluteTimeAndMovesAcrossDays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/Moscow"))
+        let date = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 10, minute: 7)))
+        let next = TaskEngine.calendarMoveDate(from: date, translation: CGSize(width: 220, height: 16),
+                                               dayWidth: 200, hourHeight: 64, calendar: calendar)
+        XCTAssertEqual(calendar.component(.day, from: next), 15)
+        XCTAssertEqual(calendar.component(.hour, from: next), 10)
+        XCTAssertEqual(calendar.component(.minute, from: next), 15)
+        let top = TaskEngine.calendarMoveDate(from: date, translation: CGSize(width: 0, height: -2000),
+                                              dayWidth: 200, hourHeight: 64, calendar: calendar)
+        XCTAssertEqual(calendar.component(.hour, from: top), 0)
+        let bottom = TaskEngine.calendarMoveDate(from: date, translation: CGSize(width: 0, height: 2000),
+                                                 dayWidth: 200, hourHeight: 64, calendar: calendar)
+        XCTAssertEqual(calendar.component(.hour, from: bottom), 23)
+        XCTAssertEqual(calendar.component(.minute, from: bottom), 45)
     }
 
     func testCalendarDropRoundsToQuarterHourInUserTimeZone() throws {

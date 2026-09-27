@@ -84,7 +84,7 @@ enum CalendarNavigation {
         from anchor: Date,
         mode: TaskCalendarMode,
         direction: Int,
-        calendar: Calendar = .current
+        calendar: Calendar = PlannerCalendar.current
     ) -> Date {
         let component: Calendar.Component = mode == .month ? .month : .day
         return calendar.date(byAdding: component, value: direction, to: anchor) ?? anchor
@@ -92,6 +92,9 @@ enum CalendarNavigation {
 }
 
 enum TaskSidebarSelection: Hashable {
+    case all
+    case tomorrow
+    case unscheduled
     case today
     case nextSevenDays
     case inbox
@@ -237,11 +240,17 @@ struct ManagedTask: Identifiable, Codable, Equatable {
     var links: [URL] = []
     var startDate: Date?
     var dueDate: Date?
+    var plannedEndDate: Date?
+    var seriesRootID: UUID?
+    var occurrenceDate: Date?
+    var excludedOccurrences: [Date]?
+    var sourceUnavailable: Bool?
     var durationMinutes: Int = 30
     var isAllDay = false
     var timeZoneID = TimeZone.current.identifier
     var reminders: [TaskReminder] = []
     var repeatRule: TaskRepeatRule?
+    var nextOccurrenceID: UUID?
     var priority: TaskPriority = .none
     var isImportant = false
     var tags: [String] = []
@@ -292,7 +301,7 @@ struct ManagedTask: Identifiable, Codable, Equatable {
 
     var calendarEndDate: Date? {
         guard let startDate else { return nil }
-        return Calendar.current.date(byAdding: .minute, value: max(15, durationMinutes), to: startDate)
+        return plannedEndDate ?? PlannerCalendar.current.date(byAdding: .minute, value: max(15, durationMinutes), to: startDate)
     }
 }
 
@@ -316,7 +325,8 @@ struct PomodoroSession: Identifiable, Codable, Equatable {
 
 struct ActivePomodoro: Codable, Equatable {
     var id = UUID()
-    var taskID: UUID
+    var taskID: UUID?
+    var isStopwatch: Bool?
     var phase: PomodoroPhase = .work
     var startedAt = Date()
     var targetSeconds: Int

@@ -132,6 +132,15 @@ struct GroupsView: View {
                     }
                 }
 
+                Text(store.groupStatusExplanation(group.id)).font(.caption).foregroundStyle(.secondary)
+                if store.hasPendingGroupRule(group.id) {
+                    HStack {
+                        Text("Есть неприменённые изменения").font(.caption)
+                        Spacer()
+                        Button("Отменить изменения") { store.discardGroupRule(group.id) }
+                        Button("Применить правило") { store.applyGroupRule(group.id) }.buttonStyle(PrimaryButtonStyle())
+                    }
+                }
                 Divider().overlay(HidigPalette.line)
 
                 if !group.isEnabled {

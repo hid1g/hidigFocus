@@ -2,16 +2,20 @@ import XCTest
 @testable import hidigFocus
 
 final class ModelTests: XCTestCase {
-    func testTasksAppearImmediatelyBeforeGroups() {
+    func testPlannerAndFocusSectionsAreBeforeGroups() {
         XCTAssertEqual(AppSection.allCases.first, .tasks)
-        XCTAssertEqual(AppSection.allCases.dropFirst().first, .groups)
+        XCTAssertEqual(Array(AppSection.allCases.prefix(4)), [.tasks, .calendar, .pomodoro, .groups])
     }
 
-    func testOnlyNordPaletteIsCurrentlyExposed() {
+    func testThemeSelectionKeepsLegacyPreferencesAndDistinctModes() {
         let palettes = SidebarColorPreference.allCases
-        XCTAssertEqual(palettes, [.ocean])
-        XCTAssertNotEqual(SidebarColorPreference.ocean.theme(isDark: false).canvas,
-                          SidebarColorPreference.ocean.theme(isDark: true).canvas)
+        XCTAssertEqual(Set(palettes.map(\.id)).count, palettes.count)
+        for raw in ["ocean", "sage", "cream", "graphite", "lavender", "rose"] {
+            XCTAssertNotNil(SidebarColorPreference(rawValue: raw))
+        }
+        for palette in palettes {
+            XCTAssertNotEqual(palette.theme(isDark: false).canvas, palette.theme(isDark: true).canvas)
+        }
     }
 
     func testCalendarZoomClampsToUsableRange() {

@@ -78,6 +78,7 @@ struct JournalView: View {
                         .fixedSize()
                         .disabled(store.selectedJournalEntry == nil)
                 }
+                if store.journalSaveState.isError { Button("Повторить сохранение") { store.retryJournalSave() } }
                 Text(store.journalSaveState.title)
                     .hidigFont(size: 9, weight: .medium)
                     .foregroundStyle(store.journalSaveState.isError ? HidigPalette.warning : HidigPalette.secondary)

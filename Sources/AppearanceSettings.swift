@@ -134,21 +134,25 @@ enum SidebarColorPreference: String, CaseIterable, Identifiable {
     case lavender
     case rose
     case ocean
+    case blue
+    case amber
+    case midnight
 
-    // Other palettes remain decodable for existing settings, but Nord is the only
-    // user-facing palette until the replacement theme set is ready.
-    static let allCases: [SidebarColorPreference] = [.ocean]
+    static let allCases: [SidebarColorPreference] = [.ocean, .blue, .sage, .graphite, .cream, .lavender, .rose, .amber, .midnight]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .sage: return "Стандартная"
+        case .sage: return "Лес"
         case .cream: return "Solarized"
         case .graphite: return "Графит"
         case .lavender: return "Сумерки"
         case .rose: return "Розовый кварц"
         case .ocean: return "Nord"
+        case .blue: return "Синий"
+        case .amber: return "Песок"
+        case .midnight: return "Полночь"
         }
     }
 
@@ -162,6 +166,18 @@ enum SidebarColorPreference: String, CaseIterable, Identifiable {
 
     func theme(isDark: Bool) -> HidigThemeColors {
         switch self {
+        case .blue:
+            return isDark
+                ? HidigThemeColors(canvas: "#202733", sidebar: "#19212E", surface: "#293345", surfaceRaised: "#323E53", line: "#465675", accentSoft: "#294A79", accent: "#7DAEFF", text: "#EDF3FF", secondary: "#ACBAD0", hover: "#34435C", disabled: "#2C3544")
+                : HidigThemeColors(canvas: "#F5F7FC", sidebar: "#E7EEFA", surface: "#FFFFFF", surfaceRaised: "#EEF3FC", line: "#CFD9EA", accentSoft: "#DFEAFE", accent: "#3769C8", text: "#24324A", secondary: "#63728B", hover: "#E2EBFA", disabled: "#EBEFF6")
+        case .amber:
+            return isDark
+                ? HidigThemeColors(canvas: "#24201B", sidebar: "#1C1915", surface: "#302A22", surfaceRaised: "#3A3228", line: "#554A3B", accentSoft: "#59452A", accent: "#DEB16A", text: "#F6F0E6", secondary: "#C0B39F", hover: "#40362B", disabled: "#2F2922")
+                : HidigThemeColors(canvas: "#FAF7F1", sidebar: "#EFE5D4", surface: "#FFFDFA", surfaceRaised: "#F7EEDC", line: "#DDD0B9", accentSoft: "#F0DFC0", accent: "#926B27", text: "#3C3324", secondary: "#7B6C55", hover: "#EFE2CB", disabled: "#F1ECE3")
+        case .midnight:
+            return isDark
+                ? HidigThemeColors(canvas: "#141519", sidebar: "#0E0F12", surface: "#1E2026", surfaceRaised: "#282B33", line: "#3C404C", accentSoft: "#36304D", accent: "#BAA1ED", text: "#F0EEF5", secondary: "#AAA5B9", hover: "#2D293A", disabled: "#22212A")
+                : HidigThemeColors(canvas: "#F5F4F8", sidebar: "#E5E2ED", surface: "#FEFDFF", surfaceRaised: "#EEEAF5", line: "#D2CBDF", accentSoft: "#E6DBF6", accent: "#705299", text: "#30293C", secondary: "#72677F", hover: "#E9E3F2", disabled: "#EEEAF2")
         case .sage:
             return isDark
                 ? HidigThemeColors(canvas: "#101611", sidebar: "#182019", surface: "#1C251E", surfaceRaised: "#222D25", line: "#34463A", accentSoft: "#36543A", accent: "#84B77D", text: "#EEF5EC", secondary: "#A9B8A8", hover: "#29382D", disabled: "#202A22")

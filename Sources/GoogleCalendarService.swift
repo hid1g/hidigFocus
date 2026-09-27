@@ -159,9 +159,24 @@ final class GoogleCalendarService: NSObject, ASWebAuthenticationPresentationCont
             URLQueryItem(name: "maxResults", value: "2500")
         ]
         query.append(URLQueryItem(name: "orderBy", value: "startTime"))
-        let data = try await request(path: "calendars/\(escape(calendarID))/events", method: "GET", query: query)
-        let root = try JSONDecoder().decode(EventListResponse.self, from: data)
-        return root.items.compactMap { $0.snapshot(calendarID: calendarID) }
+        var events: [GoogleCalendarEventSnapshot] = []
+        var page: String?
+        repeat {
+            var pageQuery = query
+            if let page { pageQuery.append(URLQueryItem(name: "pageToken", value: page)) }
+            let data = try await request(path: "calendars/\(escape(calendarID))/events", method: "GET", query: pageQuery)
+            let root = try JSONDecoder().decode(EventListResponse.self, from: data)
+            events += root.items.compactMap { $0.snapshot(calendarID: calendarID) }
+            page = root.nextPageToken
+        } while page != nil
+        return events
+    }
+
+    func event(calendarID: String, eventID: String) async throws -> GoogleCalendarEventSnapshot? {
+        do {
+            let data = try await request(path: "calendars/\(escape(calendarID))/events/\(escape(eventID))", method: "GET")
+            return try JSONDecoder().decode(APIEvent.self, from: data).snapshot(calendarID: calendarID)
+        } catch GoogleCalendarError.api(let status, _) where status == 404 || status == 410 { return nil }
     }
 
     func createEvent(from task: ManagedTask, calendarID: String) async throws -> GoogleCalendarEventSnapshot {
@@ -284,7 +299,7 @@ private struct CalendarListResponse: Decodable {
     var items: [Item]
 }
 
-private struct EventListResponse: Decodable { var items: [APIEvent] }
+private struct EventListResponse: Decodable { var items: [APIEvent]; var nextPageToken: String? }
 
 private struct APIEvent: Codable {
     struct Point: Codable { var dateTime: String?; var date: String?; var timeZone: String? }

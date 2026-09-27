@@ -13,6 +13,9 @@ struct SettingsView: View {
     @AppStorage(HidigSettingsKeys.showDockIcon) private var showDockIcon = true
     @AppStorage(HidigSettingsKeys.openWindowOnLaunch) private var openWindowOnLaunch = true
 
+    @AppStorage("planner.firstWeekday") private var plannerWeekday = 2
+    @AppStorage("planner.use24Hours") private var planner24Hours = true
+    @AppStorage("planner.timeZone") private var plannerZone = ""
     @State private var launchAtLogin = LaunchAtLoginController.isEnabled
     @State private var showsBrowserHelp = false
 
@@ -28,6 +31,18 @@ struct SettingsView: View {
                 )
 
                 appearanceSection
+                SoftPanel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Календарь").font(.headline)
+                        Picker("Первый день недели", selection: $plannerWeekday) { Text("Понедельник").tag(2); Text("Воскресенье").tag(1) }
+                        Toggle("24-часовой формат", isOn: $planner24Hours)
+                        Picker("Часовой пояс", selection: $plannerZone) {
+                            Text("Системный").tag("")
+                            ForEach(["Europe/Moscow", "Europe/London", "Europe/Berlin", "Asia/Dubai", "America/New_York"], id: \.self) { Text($0).tag($0) }
+                        }
+                        Text("Уменьшение движения используется из системных настроек macOS.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 16) {
                     applicationSection
@@ -40,6 +55,9 @@ struct SettingsView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 28)
             .frame(maxWidth: 820, alignment: .leading)
+            .onChange(of: plannerWeekday) { _ in store.prepareCalendarIndex(force: true) }
+            .onChange(of: plannerZone) { _ in store.prepareCalendarIndex(force: true) }
+            .onChange(of: planner24Hours) { _ in store.planner.calendarRevision += 1 }
         }
         .foregroundStyle(HidigPalette.forest)
         .background(HidigPalette.canvas)
@@ -71,8 +89,8 @@ struct SettingsView: View {
     }
 
     private var appearanceSection: some View {
-        settingsSection("Оформление", description: "Nord используется как базовая палитра. Светлый, тёмный и системный режимы остаются доступны.") {
-            settingLabel("Тема")
+        settingsSection("Оформление", description: "Выберите палитру и светлый, тёмный или системный режим. Каждая палитра меняет оформление всего приложения.") {
+            settingLabel("Режим")
             HStack(spacing: 10) {
                 ForEach(AppearancePreference.allCases) { option in
                     ThemeChoiceCard(option: option, isSelected: appearanceRaw == option.rawValue) {
@@ -109,7 +127,7 @@ struct SettingsView: View {
             }
 
             Divider().overlay(HidigPalette.line).padding(.vertical, 3)
-            settingLabel("Базовая палитра")
+            settingLabel("Темы")
             LazyVGrid(columns: threeColumns, spacing: 9) {
                 ForEach(SidebarColorPreference.allCases) { option in
                     PaletteChoiceCard(option: option, isSelected: sidebarColorRaw == option.rawValue) {

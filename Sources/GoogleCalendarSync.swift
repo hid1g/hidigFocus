@@ -13,6 +13,7 @@ struct GoogleCalendarEventSnapshot: Codable, Equatable {
     var updatedAt: Date
     var recurrence: [String] = []
     var isDeleted = false
+    var identity: String { "google:\(calendarID):\(id)" }
 }
 
 enum GoogleSyncDecision: Equatable {
@@ -32,10 +33,9 @@ enum GoogleSyncEngine {
         guard task.googleEventID != nil else { return .createRemote }
         guard let remote else { return .unlinkDeletedRemote }
         if remote.isDeleted { return .unlinkDeletedRemote }
-        if task.googleETag == remote.etag { return .unchanged }
 
         let localChanged = task.lastSyncedAt.map { task.modifiedAt > $0 } ?? true
-        let remoteChanged = task.lastSyncedAt.map { remote.updatedAt > $0 } ?? true
+        let remoteChanged = task.googleETag != remote.etag && (task.lastSyncedAt.map { remote.updatedAt > $0 } ?? true)
         switch (localChanged, remoteChanged) {
         case (true, false): return .updateRemote
         case (false, true): return .updateLocal
@@ -49,6 +49,7 @@ enum GoogleSyncEngine {
         task.title = remote.title
         task.description = remote.description
         task.startDate = remote.startDate
+        task.plannedEndDate = remote.endDate
         task.durationMinutes = max(15, Int(remote.endDate.timeIntervalSince(remote.startDate) / 60))
         task.isAllDay = remote.isAllDay
         task.timeZoneID = remote.timeZoneID

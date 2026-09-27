@@ -34,8 +34,6 @@ struct HidigFocusApp: App {
             HidigSettingsKeys.showDockIcon: true,
             HidigSettingsKeys.openWindowOnLaunch: true
         ])
-        // The current release intentionally exposes Nord as the single base palette.
-        UserDefaults.standard.set(SidebarColorPreference.ocean.rawValue, forKey: HidigSettingsKeys.sidebarColor)
     }
 
     var body: some Scene {
@@ -43,6 +41,8 @@ struct HidigFocusApp: App {
             RootView()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
                 .environmentObject(store)
+                .environmentObject(store.planner)
+                .environmentObject(store.reminderService)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
                 .frame(minWidth: 980, minHeight: 680)
@@ -53,7 +53,13 @@ struct HidigFocusApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .newItem) {
+                Button("Новая задача") { store.selectedSection = .tasks; _ = store.addManagedTask(named: "Новая задача") }.keyboardShortcut("n", modifiers: [.command])
+            }
+            CommandGroup(replacing: .undoRedo) {
+                Button("Отменить действие с задачей") { store.undoTaskAction() }.keyboardShortcut("z", modifiers: [.command])
+                Button("Повторить действие с задачей") { store.redoTaskAction() }.keyboardShortcut("z", modifiers: [.command, .shift])
+            }
             CommandMenu("hidigFocus") {
                 Button("Синхронизировать TickTick") {
                     Task { await store.refreshConnectionAndTasks() }
@@ -62,10 +68,32 @@ struct HidigFocusApp: App {
             }
         }
 
+        Window("Помодоро", id: "focus") {
+            FocusView()
+                .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
+                .environmentObject(store)
+                .environment(\.hidigFontPreference, selectedFont)
+                .environment(\.hidigTextScale, selectedTextSize.scale)
+                .frame(minWidth: 780, minHeight: 620)
+        }
+        .defaultSize(width: 920, height: 700)
+
+        Window("Быстрые задачи", id: "quick") {
+            MenuBarPanel()
+                .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
+                .environmentObject(store)
+                .environmentObject(store.planner)
+                .environmentObject(store.reminderService)
+                .environment(\.hidigFontPreference, selectedFont)
+                .environment(\.hidigTextScale, selectedTextSize.scale)
+        }.windowResizability(.contentSize)
+
         MenuBarExtra {
             MenuBarPanel()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
                 .environmentObject(store)
+                .environmentObject(store.planner)
+                .environmentObject(store.reminderService)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
         } label: {
@@ -78,6 +106,8 @@ struct HidigFocusApp: App {
             SettingsView()
                 .environment(\.hidigPaletteIdentity, "\(paletteRaw)-\(customPaletteHex)")
                 .environmentObject(store)
+                .environmentObject(store.planner)
+                .environmentObject(store.reminderService)
                 .environment(\.hidigFontPreference, selectedFont)
                 .environment(\.hidigTextScale, selectedTextSize.scale)
                 .frame(width: 760, height: 720)

@@ -7,7 +7,7 @@ struct AppStateRepository {
     private let directoryOverride: URL?
 
     init(applicationSupportDirectory: URL? = nil) {
-        directoryOverride = applicationSupportDirectory
+        directoryOverride = applicationSupportDirectory ?? ProcessInfo.processInfo.environment["HIDIGFOCUS_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
     var applicationSupportDirectory: URL {
@@ -30,15 +30,39 @@ struct AppStateRepository {
         defer { sqlite3_close(database) }
         try migrate(database)
         if let data = try readSnapshot(database) {
-            return try JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data)
+            return try upgraded(JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data), database: database)
         }
         if fileManager.fileExists(atPath: stateURL.path) {
             let data = try Data(contentsOf: stateURL)
-            let state = try JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data)
+            let state = try upgraded(JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data), database: database)
             try writeSnapshot(data, database: database)
             return state
         }
         return PersistedAppState()
+    }
+
+    private func upgraded(_ loaded: PersistedAppState, database: OpaquePointer) throws -> PersistedAppState {
+        guard loaded.schemaVersion < 3 else { return loaded }
+        _ = try createBackup(label: "before-schema-3")
+        var state = loaded
+        state.schemaVersion = 3
+        var seen = Set(state.managedTasks.map(\.id))
+        func flatten(_ children: [ManagedTask], parent: UUID) {
+            for child in children {
+                var value = child; value.parentTaskID = parent; value.subtasks = []
+                if seen.insert(value.id).inserted { state.managedTasks.append(value) }
+                flatten(child.subtasks, parent: child.id)
+            }
+        }
+        for index in loaded.managedTasks.indices {
+            let task = loaded.managedTasks[index]
+            flatten(task.subtasks, parent: task.id)
+            state.managedTasks[index].subtasks = []
+            // Preserve all legacy deadlines; the old duration already defines the interval.
+            state.managedTasks[index].plannedEndDate = task.calendarEndDate
+        }
+        try writeSnapshot(JSONEncoder.hidigFocus.encode(state), database: database)
+        return state
     }
 
     func save(_ state: PersistedAppState) throws {
@@ -97,7 +121,7 @@ struct AppStateRepository {
         try execute("BEGIN IMMEDIATE", database: database)
         do {
             var statement: OpaquePointer?
-            let sql = "INSERT INTO state_snapshot(id, schema_version, payload, updated_at) VALUES (1, 2, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version, payload=excluded.payload, updated_at=excluded.updated_at"
+            let sql = "INSERT INTO state_snapshot(id, schema_version, payload, updated_at) VALUES (1, 3, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version, payload=excluded.payload, updated_at=excluded.updated_at"
             guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw PersistenceError.sqlite(message(database)) }
             defer { sqlite3_finalize(statement) }
             let status = data.withUnsafeBytes { rawBuffer in
@@ -128,8 +152,8 @@ private enum PersistenceError: LocalizedError {
     }
 }
 
-final class JournalRepository {
-    private let fileManager = FileManager.default
+final class JournalRepository: Sendable {
+    private var fileManager: FileManager { .default }
     private let directoryURL: URL
 
     init(applicationSupportDirectory: URL) {

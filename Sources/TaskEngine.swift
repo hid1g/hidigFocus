@@ -4,6 +4,10 @@ struct TickTickImportRecord: Codable, Equatable {
     var sourceID: String
     var projectSourceID: String
     var title: String
+    var parentSourceID: String?
+    var childSourceIDs: [String]?
+    // A fetched ancestor supplies structure, not an active planning series.
+    var isHierarchyContext: Bool?
     var description: String = ""
     var notes: String = ""
     var startDate: Date?
@@ -21,6 +25,7 @@ struct TickTickImportRecord: Codable, Equatable {
     var completedPomodoros = 0
     var durationMinutes = 30
     var isCompleted: Bool?
+    var isAbandoned: Bool?
 
     var completed: Bool { isCompleted ?? (completedAt != nil) }
 }
@@ -38,7 +43,7 @@ enum TaskEngine {
         yOffset: CGFloat,
         hourHeight: CGFloat = 64,
         firstHour: Int = 7,
-        calendar: Calendar = .current
+        calendar: Calendar = PlannerCalendar.current
     ) -> Date {
         let safeHeight = max(1, hourHeight)
         let rawMinute = firstHour * 60 + Int(max(0, yOffset) / safeHeight * 60)
@@ -67,6 +72,10 @@ enum TaskEngine {
             var copy = task
             copy.id = UUID()
             copy.parentTaskID = parentID
+            copy.nextOccurrenceID = nil
+            copy.seriesRootID = nil
+            copy.occurrenceDate = nil
+            copy.excludedOccurrences = nil
             copy.sourceID = nil
             copy.sourceName = nil
             copy.sourceListID = nil
@@ -116,12 +125,14 @@ enum TaskEngine {
         merge(\.title); merge(\.description); merge(\.notes); merge(\.listID)
         merge(\.startDate); merge(\.dueDate); merge(\.durationMinutes); merge(\.isAllDay)
         merge(\.timeZoneID); merge(\.priority); merge(\.tags); merge(\.checklist)
-        merge(\.repeatRule); merge(\.reminders)
+        merge(\.repeatRule); merge(\.reminders); merge(\.attachments); merge(\.subtasks)
+        merge(\.plannedEndDate); merge(\.excludedOccurrences)
         updateTask(latest, in: &state)
     }
 
     static func setCompleted(_ id: UUID, completed: Bool, in state: inout PersistedAppState, now: Date = Date()) {
         guard let index = state.managedTasks.firstIndex(where: { $0.id == id }) else { return }
+        let wasActive = state.managedTasks[index].status == .active
         state.managedTasks[index].status = completed ? .completed : .active
         state.managedTasks[index].completedAt = completed ? now : nil
         state.managedTasks[index].modifiedAt = now
@@ -129,6 +140,25 @@ enum TaskEngine {
             TaskChange(date: now, summary: completed ? "Задача выполнена" : "Задача восстановлена"),
             at: 0
         )
+        let original = state.managedTasks[index]
+        // Imported RRULEs stay under the source's control until edited locally.
+        if completed, wasActive, original.nextOccurrenceID == nil,
+           let rule = original.repeatRule, rule.sourceRule == nil,
+           let date = original.startDate ?? original.dueDate {
+            var calendar = Calendar.current
+            calendar.timeZone = TimeZone(identifier: original.timeZoneID) ?? .current
+            if let next = nextOccurrence(after: date, for: rule, calendar: calendar),
+               let nextID = duplicate(id, in: &state) {
+                schedule(nextID, at: next, durationMinutes: original.durationMinutes,
+                         allDay: original.isAllDay, in: &state, now: now)
+                state.managedTasks[index].nextOccurrenceID = nextID
+                if let nextIndex = state.managedTasks.firstIndex(where: { $0.id == nextID }) {
+                    state.managedTasks[nextIndex].seriesRootID = original.id
+                    state.managedTasks[nextIndex].occurrenceDate = next
+                    state.managedTasks[nextIndex].repeatRule = nil
+                }
+            }
+        }
     }
 
     static func trash(_ id: UUID, in state: inout PersistedAppState, now: Date = Date()) {
@@ -136,10 +166,17 @@ enum TaskEngine {
         state.managedTasks[index].status = .trashed
         state.managedTasks[index].deletedAt = now
         state.managedTasks[index].modifiedAt = now
+        let childIDs = state.managedTasks.filter { $0.parentTaskID == id || $0.seriesRootID == id }.map(\.id)
+        for child in childIDs { trash(child, in: &state, now: now) }
     }
 
     static func restoreFromTrash(_ id: UUID, in state: inout PersistedAppState, now: Date = Date()) {
         guard let index = state.managedTasks.firstIndex(where: { $0.id == id }) else { return }
+        let deletedAt = state.managedTasks[index].deletedAt
+        let children = state.managedTasks.filter {
+            ($0.parentTaskID == id || $0.seriesRootID == id) && $0.deletedAt == deletedAt && $0.status == .trashed
+        }.map(\.id)
+        for child in children { restoreFromTrash(child, in: &state, now: now) }
         state.managedTasks[index].status = .active
         state.managedTasks[index].deletedAt = nil
         state.managedTasks[index].modifiedAt = now
@@ -156,8 +193,9 @@ enum TaskEngine {
         state.managedTasks[index].startDate = date
         if let durationMinutes { state.managedTasks[index].durationMinutes = max(15, durationMinutes) }
         if let allDay { state.managedTasks[index].isAllDay = allDay }
-        state.managedTasks[index].dueDate = date.map {
-            state.managedTasks[index].isAllDay ? $0 : $0.addingTimeInterval(Double(state.managedTasks[index].durationMinutes * 60))
+        // Scheduling controls the planned interval, never the independent deadline.
+        state.managedTasks[index].plannedEndDate = date.map {
+            $0.addingTimeInterval(Double(state.managedTasks[index].durationMinutes * 60))
         }
         state.managedTasks[index].modifiedAt = now
     }
@@ -168,17 +206,43 @@ enum TaskEngine {
         state.managedTasks[index].modifiedAt = now
     }
 
-    static func nextOccurrence(after date: Date, for rule: TaskRepeatRule, calendar: Calendar = .current) -> Date? {
+    static func calendarMoveDate(from start: Date, translation: CGSize, dayWidth: CGFloat,
+                                 hourHeight: CGFloat, calendar: Calendar = PlannerCalendar.current) -> Date {
+        let dayShift = Int((translation.width / max(1, dayWidth)).rounded())
+        let minutes = calendar.component(.hour, from: start) * 60 + calendar.component(.minute, from: start)
+        let target = Double(minutes) + Double(translation.height / max(1, hourHeight)) * 60
+        let snapped = max(0, min(1425, Int((target / 15).rounded()) * 15))
+        let day = calendar.date(byAdding: .day, value: dayShift, to: start) ?? start
+        return calendar.date(bySettingHour: snapped / 60, minute: snapped % 60, second: 0, of: day) ?? start
+    }
+
+    static func nextOccurrence(after date: Date, for rule: TaskRepeatRule, calendar: Calendar = PlannerCalendar.current) -> Date? {
         let interval = max(1, rule.interval)
         let candidate: Date?
-        switch rule.frequency {
-        case .daily: candidate = calendar.date(byAdding: .day, value: interval, to: date)
-        case .weekly: candidate = calendar.date(byAdding: .weekOfYear, value: interval, to: date)
-        case .monthly: candidate = calendar.date(byAdding: .month, value: interval, to: date)
-        case .yearly: candidate = calendar.date(byAdding: .year, value: interval, to: date)
+        let weekdays = rule.weekdays.filter { (1...7).contains($0) }
+        if rule.frequency == .weekly && !weekdays.isEmpty {
+            guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start else { return nil }
+            // Search the rest of this week, then the next eligible interval week.
+            candidate = (1...(interval * 7 + 7)).lazy.compactMap { offset -> Date? in
+                guard let day = calendar.date(byAdding: .day, value: offset, to: date),
+                      weekdays.contains(calendar.component(.weekday, from: day)),
+                      let start = calendar.dateInterval(of: .weekOfYear, for: day)?.start else { return nil }
+                let weeks = (calendar.dateComponents([.day], from: weekStart, to: start).day ?? 0) / 7
+                return weeks % interval == 0 ? day : nil
+            }.first
+        } else {
+            let component: Calendar.Component
+            switch rule.frequency {
+            case .daily: component = .day
+            case .weekly: component = .weekOfYear
+            case .monthly: component = .month
+            case .yearly: component = .year
+            }
+            candidate = calendar.date(byAdding: component, value: interval, to: date)
         }
         guard let candidate else { return nil }
-        if let endDate = rule.endDate, candidate > endDate { return nil }
+        if let endDate = rule.endDate,
+           calendar.startOfDay(for: candidate) > calendar.startOfDay(for: endDate) { return nil }
         return candidate
     }
 
@@ -193,6 +257,21 @@ enum TaskEngine {
         return true
     }
 
+    static func startFocus(taskID: UUID? = nil, phase: PomodoroPhase = .work, stopwatch: Bool = false, in state: inout PersistedAppState, now: Date = Date()) -> Bool {
+        guard state.activePomodoro == nil else { return false }
+        if let taskID, !state.managedTasks.contains(where: { $0.id == taskID && $0.status == .active }) { return false }
+        let minutes: Int
+        switch phase {
+        case .work: minutes = state.taskSettings.workMinutes
+        case .shortBreak: minutes = state.taskSettings.shortBreakMinutes
+        case .longBreak: minutes = state.taskSettings.longBreakMinutes
+        }
+        state.activePomodoro = ActivePomodoro(taskID: taskID, isStopwatch: stopwatch, phase: phase, startedAt: now, targetSeconds: max(1, minutes) * 60)
+        return true
+    }
+    static func focusElapsed(_ active: ActivePomodoro, now: Date = Date()) -> Int {
+        max(0, Int((active.pausedAt ?? now).timeIntervalSince(active.startedAt)) - active.accumulatedPauseSeconds)
+    }
     static func pausePomodoro(in state: inout PersistedAppState, now: Date = Date()) {
         guard state.activePomodoro?.pausedAt == nil else { return }
         state.activePomodoro?.pausedAt = now
@@ -216,7 +295,7 @@ enum TaskEngine {
             phase: active.phase,
             startedAt: active.startedAt,
             endedAt: now,
-            durationSeconds: duration,
+            durationSeconds: completed && active.isStopwatch != true ? min(duration, active.targetSeconds) : duration,
             wasCompleted: completed
         )
         state.pomodoroSessions.append(session)
@@ -233,13 +312,14 @@ enum TaskEngine {
         lists: [TaskList],
         records: [TickTickImportRecord],
         into state: inout PersistedAppState,
-        now: Date = Date()
+        now: Date = Date(),
+        completeSnapshot: Bool = false
     ) -> TaskImportReport {
         var report = TaskImportReport(
             startedAt: now,
             foldersFound: folders.count,
             listsFound: lists.count,
-            activeTasksFound: records.filter { !$0.completed }.count,
+            activeTasksFound: records.filter { !$0.completed && $0.isAbandoned != true }.count,
             completedTasksFound: records.filter { $0.completed }.count
         )
 
@@ -253,13 +333,24 @@ enum TaskEngine {
                 state.taskLists[index].sortOrder = list.sortOrder
             } else { state.taskLists.append(list) }
         }
+        if completeSnapshot {
+            let present = Set(records.map(\.sourceID))
+            for index in state.managedTasks.indices where state.managedTasks[index].sourceName == "TickTick" && state.managedTasks[index].status == .active {
+                if let id = state.managedTasks[index].sourceID { state.managedTasks[index].sourceUnavailable = !present.contains(id) }
+            }
+        }
         let listBySource = Dictionary(uniqueKeysWithValues: state.taskLists.compactMap { list in
             list.sourceID.map { ($0, list.id) }
         })
 
+        var taskBySource = Dictionary(state.managedTasks.enumerated().compactMap { index, task -> (String, Int)? in
+            guard task.sourceName == "TickTick", let sourceID = task.sourceID else { return nil }
+            return (sourceID, index)
+        }, uniquingKeysWith: { first, _ in first })
+
         for record in records {
             let listID = listBySource[record.projectSourceID] ?? TaskList.inboxID
-            if let index = state.managedTasks.firstIndex(where: { $0.sourceName == "TickTick" && $0.sourceID == record.sourceID }) {
+            if let index = taskBySource[record.sourceID] {
                 let original = state.managedTasks[index]
                 // Preserve local edits while the corresponding source field is unchanged.
                 // On the first reconciliation the source repairs stale legacy imports.
@@ -268,6 +359,9 @@ enum TaskEngine {
                     previous.map { $0[keyPath: key] != record[keyPath: key] } ?? true
                 }
                 if original.status != .trashed {
+                    if previous?.parentSourceID != nil && record.parentSourceID == nil && changed(\.parentSourceID) {
+                        state.managedTasks[index].parentTaskID = nil
+                    }
                     if changed(\.title) { state.managedTasks[index].title = record.title }
                     if changed(\.description) { state.managedTasks[index].description = record.description }
                     if changed(\.notes) { state.managedTasks[index].notes = record.notes }
@@ -279,6 +373,7 @@ enum TaskEngine {
                         state.managedTasks[index].startDate = record.startDate
                         state.managedTasks[index].dueDate = record.dueDate
                         state.managedTasks[index].durationMinutes = record.durationMinutes
+                        state.managedTasks[index].plannedEndDate = record.startDate.map { $0.addingTimeInterval(Double(record.durationMinutes * 60)) }
                         state.managedTasks[index].isAllDay = record.isAllDay
                     }
                     if changed(\.timeZoneID) { state.managedTasks[index].timeZoneID = record.timeZoneID }
@@ -288,11 +383,12 @@ enum TaskEngine {
                     if changed(\.reminders) { state.managedTasks[index].reminders = record.reminders }
                     if changed(\.checklist) { state.managedTasks[index].checklist = record.checklist }
                     if changed(\.sortOrder) { state.managedTasks[index].sortOrder = record.sortOrder }
-                    if previous?.completed != record.completed || changed(\.completedAt) {
-                        state.managedTasks[index].status = record.completed ? .completed : .active
+                    if previous?.completed != record.completed || changed(\.completedAt) || (previous?.isAbandoned ?? false) != (record.isAbandoned ?? false) {
+                        state.managedTasks[index].status = record.isAbandoned == true ? .wontDo : (record.completed ? .completed : .active)
                         state.managedTasks[index].completedAt = record.completedAt
                     }
                 }
+                state.managedTasks[index].sourceUnavailable = record.isHierarchyContext == true
                 state.managedTasks[index].tickTickBaseline = record
                 if state.managedTasks[index] != original {
                     state.managedTasks[index].modifiedAt = now
@@ -306,6 +402,7 @@ enum TaskEngine {
                 }
                 continue
             }
+            taskBySource[record.sourceID] = state.managedTasks.count
             state.managedTasks.append(ManagedTask(
                 sourceID: record.sourceID,
                 sourceName: "TickTick",
@@ -316,6 +413,7 @@ enum TaskEngine {
                 notes: record.notes,
                 startDate: record.startDate,
                 dueDate: record.dueDate,
+                sourceUnavailable: record.isHierarchyContext == true,
                 durationMinutes: record.durationMinutes,
                 isAllDay: record.isAllDay,
                 timeZoneID: record.timeZoneID,
@@ -326,17 +424,49 @@ enum TaskEngine {
                 checklist: record.checklist,
                 plannedPomodoros: record.plannedPomodoros,
                 completedPomodoros: record.completedPomodoros,
-                status: record.completed ? .completed : .active,
+                status: record.isAbandoned == true ? .wontDo : (record.completed ? .completed : .active),
                 completedAt: record.completedAt,
                 sortOrder: record.sortOrder,
                 tickTickBaseline: record
             ))
             report.imported += 1
         }
+        restoreImportedHierarchy(in: &state)
         report.finishedAt = now
         state.taskImportHistory.insert(report, at: 0)
         state.taskImportHistory = Array(state.taskImportHistory.prefix(100))
         return report
+    }
+
+    /// Resolve after all rows exist: import order and incremental snapshots cannot break links.
+    static func restoreImportedHierarchy(in state: inout PersistedAppState) {
+        let indices = Dictionary(state.managedTasks.enumerated().compactMap { index, task -> (String, Int)? in
+            guard task.sourceName == "TickTick", let source = task.sourceID else { return nil }
+            return (source, index)
+        }, uniquingKeysWith: { first, _ in first })
+        var parents: [String: String] = [:]
+        for task in state.managedTasks where task.sourceName == "TickTick" {
+            guard let source = task.sourceID, let baseline = task.tickTickBaseline else { continue }
+            if let parent = baseline.parentSourceID { parents[source] = parent }
+        }
+        for task in state.managedTasks where task.sourceName == "TickTick" {
+            guard let source = task.sourceID else { continue }
+            for child in task.tickTickBaseline?.childSourceIDs ?? [] where parents[child] == nil {
+                parents[child] = source
+            }
+        }
+        for (child, parent) in parents {
+            guard let childIndex = indices[child], let parentIndex = indices[parent], child != parent else { continue }
+            var seen: Set<String> = [child]
+            var cursor: String? = parent
+            var valid = true
+            while let value = cursor {
+                if !seen.insert(value).inserted { valid = false; break }
+                cursor = parents[value]
+            }
+            guard valid else { continue }
+            state.managedTasks[childIndex].parentTaskID = state.managedTasks[parentIndex].id
+        }
     }
 
     static func completedTasks(in state: PersistedAppState) -> [ManagedTask] {
