@@ -19,6 +19,10 @@ struct MainWindowToolbarTitle: View {
             .hidigFont(size: 18, weight: .semibold)
             .foregroundStyle(HidigPalette.forest)
             .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.leading, 12)
+            .padding(.trailing, 18)
+            .padding(.vertical, 4)
             .accessibilityAddTraits(.isHeader)
     }
 }
