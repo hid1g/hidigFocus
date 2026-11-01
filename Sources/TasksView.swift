@@ -998,7 +998,7 @@ struct TaskCompletionButton: View {
         default: return "Выполнить задачу"
         }
     }
-    private func perform() {
+    @MainActor private func perform() {
         if task.status == .trashed { store.restoreManagedTask(task.id) }
         else if task.status == .wontDo { store.setManagedTaskWontDo(task.id, skipped: false) }
         else { store.setManagedTaskCompleted(task.id, completed: task.status != .completed) }
