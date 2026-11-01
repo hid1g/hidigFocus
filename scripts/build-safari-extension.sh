@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SIGNING_IDENTITY="${HIDIGFOCUS_SAFARI_SIGNING_IDENTITY:--}"
+SIGNING_TEAM="${HIDIGFOCUS_SAFARI_DEVELOPMENT_TEAM:-}"
 
 if [ -d /Applications/Xcode.app/Contents/Developer ] &&
    ! xcrun --find safari-web-extension-packager >/dev/null 2>&1; then
@@ -27,7 +29,20 @@ PROJECT_PATH="$GENERATED_DIR/hidigFocus Safari.xcodeproj"
 DERIVED_DATA="$OUTPUT_DIR/SignedDerivedData"
 PRODUCT="$DERIVED_DATA/Build/Products/Release/hidigFocus Safari.app"
 DIST_PRODUCT="$PROJECT_DIR/dist/hidigFocus Safari.app"
+DIST_ARCHIVE="$PROJECT_DIR/dist/hidigFocus-safari-extension.zip"
+BACKUP_DIR="$OUTPUT_DIR/Backups/$(date '+%Y%m%d-%H%M%S')-$$"
 mkdir -p "$OUTPUT_DIR"
+
+# Keep the previous generated project and app for rollback. Do not touch the
+# separately running hidigFocus.app or any of its settings/data.
+if [ -d "$GENERATED_DIR" ]; then
+    mkdir -p "$BACKUP_DIR"
+    ditto "$GENERATED_DIR" "$BACKUP_DIR/generated-project"
+fi
+if [ -d "$PRODUCT" ]; then
+    mkdir -p "$BACKUP_DIR"
+    ditto "$PRODUCT" "$BACKUP_DIR/previous-build.app"
+fi
 
 "$PACKAGER" "$PROJECT_DIR/SafariExtension" \
     --project-location "$OUTPUT_DIR" \
@@ -52,16 +67,32 @@ xcodebuild \
     -destination "platform=macOS" \
     -derivedDataPath "$DERIVED_DATA" \
     CODE_SIGN_STYLE=Manual \
-    CODE_SIGN_IDENTITY=- \
-    DEVELOPMENT_TEAM= \
+    CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+    DEVELOPMENT_TEAM="$SIGNING_TEAM" \
     build
 
+codesign --verify --deep --strict "$PRODUCT"
 mkdir -p "$PROJECT_DIR/dist"
-rm -rf "$DIST_PRODUCT"
-rm -f "$PROJECT_DIR/dist/hidigFocus-safari-extension.zip"
-ditto "$PRODUCT" "$DIST_PRODUCT"
+STAGING_DIR="$(mktemp -d "$PROJECT_DIR/dist/.safari-stage.XXXXXX")"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+ditto "$PRODUCT" "$STAGING_DIR/hidigFocus Safari.app"
+codesign --verify --deep --strict "$STAGING_DIR/hidigFocus Safari.app"
+ditto -c -k --sequesterRsrc --keepParent "$STAGING_DIR/hidigFocus Safari.app" "$STAGING_DIR/hidigFocus-safari-extension.zip"
 
-ditto -c -k --sequesterRsrc --keepParent "$DIST_PRODUCT" "$PROJECT_DIR/dist/hidigFocus-safari-extension.zip"
+if [ -d "$DIST_PRODUCT" ]; then
+    mkdir -p "$BACKUP_DIR"
+    mv "$DIST_PRODUCT" "$BACKUP_DIR/previous-distribution.app"
+fi
+if [ -f "$DIST_ARCHIVE" ]; then
+    mkdir -p "$BACKUP_DIR"
+    mv "$DIST_ARCHIVE" "$BACKUP_DIR/previous-distribution.zip"
+fi
+mv "$STAGING_DIR/hidigFocus Safari.app" "$DIST_PRODUCT"
+mv "$STAGING_DIR/hidigFocus-safari-extension.zip" "$DIST_ARCHIVE"
+
+if [ "$SIGNING_IDENTITY" = "-" ]; then
+    echo "Сборка ad hoc: Safari потребует разрешить неподписанные расширения заново после выхода из Safari." >&2
+fi
 
 echo "$DIST_PRODUCT"
-echo "$PROJECT_DIR/dist/hidigFocus-safari-extension.zip"
+echo "$DIST_ARCHIVE"

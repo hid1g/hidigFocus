@@ -7,7 +7,7 @@ struct AppStateRepository {
     private let directoryOverride: URL?
 
     init(applicationSupportDirectory: URL? = nil) {
-        directoryOverride = applicationSupportDirectory ?? ProcessInfo.processInfo.environment["HIDIGFOCUS_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        directoryOverride = applicationSupportDirectory ?? HidigRuntime.environment["HIDIGFOCUS_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
     var applicationSupportDirectory: URL {
@@ -34,14 +34,18 @@ struct AppStateRepository {
         }
         if fileManager.fileExists(atPath: stateURL.path) {
             let data = try Data(contentsOf: stateURL)
+            let backup = applicationSupportDirectory.appendingPathComponent("state-before-sqlite-\(UUID().uuidString).json")
+            try fileManager.copyItem(at: stateURL, to: backup)
             let state = try upgraded(JSONDecoder.hidigFocus.decode(PersistedAppState.self, from: data), database: database)
-            try writeSnapshot(data, database: database)
+            // Persist the upgraded value, never the old JSON that preceded flattening.
+            try writeSnapshot(JSONEncoder.hidigFocus.encode(state), database: database)
             return state
         }
         return PersistedAppState()
     }
 
     private func upgraded(_ loaded: PersistedAppState, database: OpaquePointer) throws -> PersistedAppState {
+        guard loaded.schemaVersion <= 3 else { throw PersistenceError.sqlite("Эта база создана более новой версией приложения. Исходные данные не изменены.") }
         guard loaded.schemaVersion < 3 else { return loaded }
         _ = try createBackup(label: "before-schema-3")
         var state = loaded
@@ -77,6 +81,38 @@ struct AppStateRepository {
         try writeSnapshot(data, database: database)
     }
 
+    /// Owned exclusively by SaveCoordinator's serial writer. Reuse the connection and
+    /// migration setup, while every snapshot still gets its own atomic transaction.
+    func makeSaveOperation() -> (PersistedAppState) throws -> Void {
+        let session = SnapshotWriter(repository: self)
+        return session.save
+    }
+
+    private final class SnapshotWriter {
+        private let repository: AppStateRepository
+        private var database: OpaquePointer?
+        init(repository: AppStateRepository) { self.repository = repository }
+        deinit { if let database { sqlite3_close(database) } }
+
+        func save(_ state: PersistedAppState) throws {
+            let data = try JSONEncoder.hidigFocus.encode(state)
+            do {
+                if database == nil {
+                    try repository.fileManager.createDirectory(at: repository.applicationSupportDirectory, withIntermediateDirectories: true)
+                    let opened = try repository.openDatabase()
+                    database = opened
+                    try repository.migrate(opened)
+                }
+                if let database { try repository.writeSnapshot(data, database: database) }
+            } catch {
+                // Reopen/recheck schema on retry after an I/O or SQLite failure.
+                if let database { sqlite3_close(database) }
+                database = nil
+                throw error
+            }
+        }
+    }
+
     @discardableResult
     func createBackup(label: String = "before-task-import") throws -> URL? {
         let source = fileManager.fileExists(atPath: databaseURL.path) ? databaseURL : stateURL
@@ -84,8 +120,28 @@ struct AppStateRepository {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let destination = applicationSupportDirectory.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent)-\(label)-\(formatter.string(from: Date())).\(source.pathExtension)")
-        try fileManager.copyItem(at: source, to: destination)
+        let destination = applicationSupportDirectory.appendingPathComponent("\(source.deletingPathExtension().lastPathComponent)-\(label)-\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(8)).\(source.pathExtension)")
+        if source == databaseURL {
+            // Online SQLite backup includes committed WAL pages and is independent of
+            // the writer connection. A filesystem copy is not a SQLite snapshot.
+            let original = try openDatabase()
+            defer { sqlite3_close(original) }
+            var target: OpaquePointer?
+            guard sqlite3_open_v2(destination.path, &target, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let target else {
+                if let target { sqlite3_close(target) }
+                throw PersistenceError.sqlite("Не удалось создать резервную копию базы.")
+            }
+            defer { sqlite3_close(target) }
+            guard let backup = sqlite3_backup_init(target, "main", original, "main") else { throw PersistenceError.sqlite(message(target)) }
+            let step = sqlite3_backup_step(backup, -1)
+            let finish = sqlite3_backup_finish(backup)
+            guard step == SQLITE_DONE, finish == SQLITE_OK else {
+                try? fileManager.removeItem(at: destination)
+                throw PersistenceError.sqlite("Не удалось завершить резервную копию базы.")
+            }
+        } else {
+            try fileManager.copyItem(at: source, to: destination)
+        }
         return destination
     }
 
@@ -111,9 +167,11 @@ struct AppStateRepository {
             throw PersistenceError.sqlite(message(database))
         }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { throw PersistenceError.sqlite(message(database)) }
         let count = Int(sqlite3_column_bytes(statement, 0))
-        guard let bytes = sqlite3_column_blob(statement, 0), count > 0 else { return nil }
+        guard let bytes = sqlite3_column_blob(statement, 0), count > 0 else { throw PersistenceError.sqlite("Снимок данных пуст или повреждён. Автоматическая замена запрещена.") }
         return Data(bytes: bytes, count: count)
     }
 

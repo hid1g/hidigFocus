@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>hidigFocus в Safari</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>hidigFocus в Safari</h1>
+      <p id="status" role="status" aria-live="polite">Проверяем правила…</p>
+      <p id="mode"></p>
+      <p id="updated"></p>
+      <p id="error" role="alert" hidden></p>
+      <button id="sync" type="button">Обновить правила</button>
+      <button id="connect" type="button" hidden>Разрешить связь с hidigFocus</button>
+      <button id="redirect" type="button" hidden>Включить страницу hidigFocus</button>
+      <p id="missing-domains" class="hint"></p>
+      <p class="hint">Правила берутся из открытого приложения hidigFocus. После изменения правил перезагрузите уже открытый сайт.</p>
+      <p class="hint">Для страницы hidigFocus Safari требует доступ к указанным сайтам. Без разрешения сохраняется стандартный блок Safari.</p>
+      <p class="hint">Связь с приложением использует только локальный адрес 127.0.0.1.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

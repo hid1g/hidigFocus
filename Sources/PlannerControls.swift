@@ -27,33 +27,41 @@ struct PlannerFilterMenu: View {
                 }
                 Divider()
                 Button("Сбросить фильтры") { workspace.filter = PlannerFilter(); workspace.search = "" }
-            } label: { Label(workspace.filter.isActive ? "Фильтры включены" : "Фильтры", systemImage: "line.3.horizontal.decrease.circle") }
+            } label: { HidigMenuButtonLabel(title: workspace.filter.isActive ? "Фильтры включены" : "Фильтры", systemImage: "line.3.horizontal.decrease.circle", isActive: workspace.filter.isActive) }
+            .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+            .accessibilityLabel(workspace.filter.isActive ? "Фильтры включены" : "Фильтры")
+            .help("Фильтры задач")
             .fixedSize()
             Menu {
                 ForEach(PlannerSort.allCases, id: \.rawValue) { sort in
                     Button(sort.title) { workspace.sort = sort }
                 }
-            } label: { Label(workspace.sort.title, systemImage: "arrow.up.arrow.down") }
+            } label: { HidigMenuButtonLabel(title: workspace.sort.title, systemImage: "arrow.up.arrow.down") }
+            .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+            .accessibilityLabel("Сортировка: \(workspace.sort.title)").help(workspace.sort.title).fixedSize()
             Spacer()
             if workspace.filter.isActive || !workspace.search.isEmpty {
-                Button("Сбросить") { workspace.filter = PlannerFilter(); workspace.search = "" }.buttonStyle(.borderless)
+                Button { workspace.filter = PlannerFilter(); workspace.search = "" } label: {
+                    Text("Сбросить").fixedSize()
+                }.buttonStyle(.borderless).accessibilityLabel("Сбросить фильтры и поиск").help("Сбросить фильтры и поиск")
             }
             SaveStatusView()
-        }.font(.system(size: 11)).padding(.horizontal, 16).padding(.vertical, 7)
+        }.hidigFont(size: 11).padding(.horizontal, 16).padding(.vertical, 7)
     }
 }
 
 struct SaveStatusView: View {
+    @EnvironmentObject private var saving: SaveState
     @EnvironmentObject private var store: AppStore
     var body: some View {
         Group {
-            switch store.taskSaveState {
+            switch saving.taskSaveState {
             case .idle: EmptyView()
             case .saving: Text("Сохраняется…")
             case .saved: Text("Сохранено")
             case .failed: Button("Повторить сохранение") { store.save() }
             }
-        }.font(.system(size: 10)).foregroundStyle(.secondary).accessibilityLabel("Состояние сохранения")
+        }.hidigFont(size: 11).fixedSize(horizontal: true, vertical: false).foregroundStyle(saving.taskSaveState.isError ? HidigPalette.warning : HidigPalette.secondary).accessibilityLabel("Состояние сохранения").accessibilityValue(saving.taskSaveState.title)
     }
 }
 
@@ -102,7 +110,7 @@ struct BulkTaskActions: View {
                     }
                 }.padding(16)
             }
-            Button { store.bulkTrash(workspace.selectedIDs) } label: { Image(systemName: "trash") }.help("В корзину")
+            Button { store.requestTaskDeletion(workspace.selectedIDs) } label: { Image(systemName: "trash") }.help("В корзину")
             Button("Снять выбор") { workspace.selectedIDs = [] }
         }.font(.system(size: 11)).padding(10).frame(maxWidth: .infinity, alignment: .leading).background(HidigPalette.surfaceRaised)
     }
@@ -128,6 +136,8 @@ struct TaskNotesEditor: NSViewRepresentable {
         case .serif: return NSFont(descriptor: NSFont.systemFont(ofSize: size).fontDescriptor.withDesign(.serif) ?? NSFont.systemFont(ofSize: size).fontDescriptor, size: size) ?? .systemFont(ofSize: size)
         case .monospaced: return .monospacedSystemFont(ofSize: size, weight: .regular)
         case .avenir: return NSFont(name: "AvenirNext-Regular", size: size) ?? .systemFont(ofSize: size)
+        case .golos, .onest, .manrope, .inter:
+            return HidigFontRegistry.name(for: preference).flatMap { NSFont(name: $0, size: size) } ?? .systemFont(ofSize: size)
         case .georgia: return NSFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
         }
     }

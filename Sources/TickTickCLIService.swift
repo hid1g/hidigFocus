@@ -45,6 +45,14 @@ struct TickTickCLIService {
         }
     }
 
+    func signOut() async throws {
+        guard let executableURL = executableURL() else { throw TickTickCLIError.cliMissing }
+        let result = try await run(executableURL: executableURL, arguments: ["auth", "logout"])
+        guard result.status == 0 else {
+            throw TickTickCLIError.commandFailed(result.stderr)
+        }
+    }
+
     func todayTasks(calendar: Calendar = .current) async throws -> [TickTickTask] {
         guard let executableURL = executableURL() else { throw TickTickCLIError.cliMissing }
 

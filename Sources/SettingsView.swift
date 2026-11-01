@@ -2,22 +2,29 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
+    @EnvironmentObject private var journal: JournalState
+    @EnvironmentObject private var integration: IntegrationState
     @EnvironmentObject private var store: AppStore
 
-    @AppStorage(HidigSettingsKeys.appearance) private var appearanceRaw = AppearancePreference.system.rawValue
-    @AppStorage(HidigSettingsKeys.font) private var fontRaw = HidigFontPreference.system.rawValue
-    @AppStorage(HidigSettingsKeys.textSize) private var textSizeRaw = HidigTextSizePreference.standard.rawValue
-    @AppStorage(HidigSettingsKeys.sidebarColor) private var sidebarColorRaw = SidebarColorPreference.ocean.rawValue
-    @AppStorage(HidigSettingsKeys.customSidebarColor) private var customSidebarColorHex = "#E5EFDA"
-    @AppStorage(HidigSettingsKeys.appIcon) private var appIconRaw = AppIconPreference.green.rawValue
-    @AppStorage(HidigSettingsKeys.showDockIcon) private var showDockIcon = true
-    @AppStorage(HidigSettingsKeys.openWindowOnLaunch) private var openWindowOnLaunch = true
+    @AppStorage(HidigSettingsKeys.appearance, store: HidigRuntime.defaults) private var appearanceRaw = AppearancePreference.system.rawValue
+    @AppStorage(HidigSettingsKeys.font, store: HidigRuntime.defaults) private var fontRaw = HidigFontPreference.system.rawValue
+    @AppStorage(HidigSettingsKeys.textSize, store: HidigRuntime.defaults) private var textSizeRaw = HidigTextSizePreference.standard.rawValue
+    @AppStorage(HidigSettingsKeys.sidebarColor, store: HidigRuntime.defaults) private var sidebarColorRaw = SidebarColorPreference.ocean.rawValue
+    @AppStorage(HidigSettingsKeys.customSidebarColor, store: HidigRuntime.defaults) private var customSidebarColorHex = "#E5EFDA"
+    @AppStorage(HidigSettingsKeys.appIcon, store: HidigRuntime.defaults) private var appIconRaw = AppIconPreference.green.rawValue
+    @AppStorage(HidigSettingsKeys.showDockIcon, store: HidigRuntime.defaults) private var showDockIcon = true
+    @AppStorage(HidigSettingsKeys.openWindowOnLaunch, store: HidigRuntime.defaults) private var openWindowOnLaunch = true
 
-    @AppStorage("planner.firstWeekday") private var plannerWeekday = 2
-    @AppStorage("planner.use24Hours") private var planner24Hours = true
-    @AppStorage("planner.timeZone") private var plannerZone = ""
-    @State private var launchAtLogin = LaunchAtLoginController.isEnabled
+    @AppStorage("planner.firstWeekday", store: HidigRuntime.defaults) private var plannerWeekday = 2
+    @AppStorage("planner.use24Hours", store: HidigRuntime.defaults) private var planner24Hours = true
+    @AppStorage("planner.timeZone", store: HidigRuntime.defaults) private var plannerZone = ""
+    @State private var launchAtLogin = false
     @State private var showsBrowserHelp = false
+
+    @AppStorage("settings.category", store: HidigRuntime.defaults) private var category = "Оформление"
+    @AppStorage(PrintDesign.iconPackKey, store: HidigRuntime.defaults) private var iconPackRaw = "duotone"
+    @AppStorage("calendarHourHeight", store: HidigRuntime.defaults) private var calendarHourHeight = 96.0
+    private let categories = ["Оформление", "Календарь", "Приложение", "Импорт", "Браузер", "Журнал"]
 
     private let threeColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -30,31 +37,34 @@ struct SettingsView: View {
                     subtitle: "Оформление, запуск, интеграции и расположение локальных данных."
                 )
 
-                appearanceSection
-                SoftPanel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Календарь").font(.headline)
-                        Picker("Первый день недели", selection: $plannerWeekday) { Text("Понедельник").tag(2); Text("Воскресенье").tag(1) }
-                        Toggle("24-часовой формат", isOn: $planner24Hours)
-                        Picker("Часовой пояс", selection: $plannerZone) {
-                            Text("Системный").tag("")
-                            ForEach(["Europe/Moscow", "Europe/London", "Europe/Berlin", "Asia/Dubai", "America/New_York"], id: \.self) { Text($0).tag($0) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 22) {
+                        ForEach(categories, id: \.self) { item in
+                            Button { category = item } label: {
+                                Text(item).hidigFont(size: 12, weight: category == item ? .semibold : .regular)
+                                    .foregroundStyle(category == item ? HidigPalette.forest : HidigPalette.secondary)
+                                    .padding(.vertical, 12)
+                                    .overlay(alignment: .bottom) { Rectangle().fill(category == item ? HidigPalette.controlFill : .clear).frame(height: 2) }
+                            }.buttonStyle(.plain).accessibilityAddTraits(category == item ? .isSelected : [])
                         }
-                        Text("Уменьшение движения используется из системных настроек macOS.").font(.caption).foregroundStyle(.secondary)
                     }
-                }
+                }.overlay(alignment: .bottom) { Rectangle().fill(HidigPalette.line).frame(height: 1) }
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 16) {
-                    applicationSection
-                    tickTickSection
-                    browserSection
-                    journalSection
+
+                switch category {
+                case "Оформление": appearanceSection
+                case "Календарь": calendarSection
+                case "Приложение": applicationSection
+                case "Импорт": tickTickSection
+                case "Браузер": browserSection
+                default: journalSection
                 }
 
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 820, alignment: .leading)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 30)
+            .frame(maxWidth: 1180, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .onChange(of: plannerWeekday) { _ in store.prepareCalendarIndex(force: true) }
             .onChange(of: plannerZone) { _ in store.prepareCalendarIndex(force: true) }
             .onChange(of: planner24Hours) { _ in store.planner.calendarRevision += 1 }
@@ -88,78 +98,138 @@ struct SettingsView: View {
         }
     }
 
+    private var calendarSection: some View {
+SoftPanel {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Календарь").font(.headline)
+                        Picker("Первый день недели", selection: $plannerWeekday) { Text("Понедельник").tag(2); Text("Воскресенье").tag(1) }
+                        Toggle("24-часовой формат", isOn: $planner24Hours)
+                        Picker("Часовой пояс", selection: $plannerZone) {
+                            Text("Системный").tag("")
+                            ForEach(["Europe/Moscow", "Europe/London", "Europe/Berlin", "Asia/Dubai", "America/New_York"], id: \.self) { Text($0).tag($0) }
+                        }
+                        Picker("Масштаб времени", selection: $calendarHourHeight) { Text("96 pt / час").tag(96.0); Text("120 pt / час").tag(120.0); if calendarHourHeight != 96 && calendarHourHeight != 120 { Text("Текущий: \(Int(calendarHourHeight)) pt / час").tag(calendarHourHeight) } }
+                        Text("Уменьшение движения используется из системных настроек macOS.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+    }
+
     private var appearanceSection: some View {
-        settingsSection("Оформление", description: "Выберите палитру и светлый, тёмный или системный режим. Каждая палитра меняет оформление всего приложения.") {
-            settingLabel("Режим")
-            HStack(spacing: 10) {
-                ForEach(AppearancePreference.allCases) { option in
-                    ThemeChoiceCard(option: option, isSelected: appearanceRaw == option.rawValue) {
-                        appearanceRaw = option.rawValue
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 28) {
+                appearanceControls.frame(minWidth: 460, maxWidth: 560)
+                appearancePreview.frame(width: 320)
+            }
+            appearanceControls
+        }
+    }
+    private var appearanceControls: some View {
+        VStack(alignment: .leading, spacing: 25) {
+            VStack(alignment: .leading, spacing: 10) {
+                settingLabel("Режим")
+                HStack(spacing: 8) {
+                    ForEach(AppearancePreference.allCases) { option in
+                        ThemeChoiceCard(option: option, isSelected: appearanceRaw == option.rawValue) { appearanceRaw = option.rawValue }
                     }
                 }
             }
-
-            Divider().overlay(HidigPalette.line).padding(.vertical, 3)
-            settingLabel("Шрифт")
-            LazyVGrid(columns: threeColumns, spacing: 9) {
-                ForEach(HidigFontPreference.allCases) { option in
+            VStack(alignment: .leading, spacing: 10) {
+                settingLabel("Цветовая схема")
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                    ForEach([SidebarColorPreference.paper, .ink, .mist, .moss]) { option in
+                        PaletteChoiceCard(option: option, isSelected: sidebarColorRaw == option.rawValue) { sidebarColorRaw = option.rawValue }
+                    }
+                }
+                DisclosureGroup("Другие палитры") {
+                    LazyVGrid(columns: threeColumns, spacing: 8) {
+                        ForEach(SidebarColorPreference.allCases.filter { ![.paper, .ink, .mist, .moss].contains($0) }) { option in
+                            PaletteChoiceCard(option: option, isSelected: sidebarColorRaw == option.rawValue) { sidebarColorRaw = option.rawValue }
+                        }
+                    }.padding(.top, 8)
+                }.hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            }
+            fontChoices
+            VStack(alignment: .leading, spacing: 10) {
+                settingLabel("Иконки разделов")
+                HStack(spacing: 8) {
+                    ForEach(HidigIconPack.allCases) { pack in
+                        ChoicePill(title: pack.title, isSelected: iconPackRaw == pack.rawValue) { iconPackRaw = pack.rawValue }
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                settingLabel("Иконка приложения")
+                HStack(spacing: 12) {
+                    ForEach([AppIconPreference.doors, .medallion]) { option in iconChoice(option) }
+                }
+                DisclosureGroup("Предыдущие иконки") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
+                        ForEach(AppIconPreference.allCases.filter { $0 != .doors && $0 != .medallion }) { option in iconChoice(option) }
+                    }.padding(.top, 8)
+                }.hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            }
+            Button("Вернуть оформление «Бумага»", action: resetAppearance).buttonStyle(GhostButtonStyle())
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var fontChoices: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            settingLabel("Шрифт интерфейса")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach([HidigFontPreference.golos, .onest, .manrope, .inter]) { option in
                     Button { fontRaw = option.rawValue } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Aa Бб").font(option.font(size: 18, weight: .semibold, design: nil))
-                            Text(option.title).font(option.font(size: 11, weight: .medium, design: nil))
-                        }
-                        .foregroundStyle(HidigPalette.forest)
-                        .padding(11)
-                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(SelectionRowButtonStyle(isSelected: fontRaw == option.rawValue))
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(option.title).font(option.font(size: 15, weight: .medium, design: nil))
+                            Text("Планы становятся яснее").font(option.font(size: 11, weight: .regular, design: nil))
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(SelectionRowButtonStyle(isSelected: fontRaw == option.rawValue))
                 }
             }
-
-            HStack(alignment: .center, spacing: 12) {
-                settingLabel("Размер текста").frame(width: 110, alignment: .leading)
+            DisclosureGroup("Системные шрифты") {
+                Picker("Системный шрифт", selection: $fontRaw) {
+                    ForEach(HidigFontPreference.allCases) { Text($0.title).tag($0.rawValue) }
+                }.padding(.top, 8)
+            }.hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            HStack(spacing: 8) {
+                Text("Размер текста").hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
                 ForEach(HidigTextSizePreference.allCases) { option in
-                    ChoicePill(title: option.title, isSelected: textSizeRaw == option.rawValue) {
-                        textSizeRaw = option.rawValue
-                    }
+                    ChoicePill(title: option.title, isSelected: textSizeRaw == option.rawValue) { textSizeRaw = option.rawValue }
                 }
             }
-
-            Divider().overlay(HidigPalette.line).padding(.vertical, 3)
-            settingLabel("Темы")
-            LazyVGrid(columns: threeColumns, spacing: 9) {
-                ForEach(SidebarColorPreference.allCases) { option in
-                    PaletteChoiceCard(option: option, isSelected: sidebarColorRaw == option.rawValue) {
-                        sidebarColorRaw = option.rawValue
-                    }
-                }
-            }
-
-            Divider().overlay(HidigPalette.line).padding(.vertical, 3)
-            settingLabel("Иконка в Dock")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                ForEach(AppIconPreference.allCases) { option in
-                    Button { appIconRaw = option.rawValue } label: {
-                        VStack(spacing: 7) {
-                            AppIconPreview(style: option, size: 48)
-                            Text(option.title).hidigFont(size: 10, weight: .semibold)
+        }
+    }
+    private func iconChoice(_ option: AppIconPreference) -> some View {
+        Button { appIconRaw = option.rawValue } label: {
+            VStack(spacing: 5) {
+                AppIconPreview(style: option, size: 64)
+                Text(option.title).hidigFont(size: 11)
+            }.padding(8)
+        }.buttonStyle(SelectionRowButtonStyle(isSelected: appIconRaw == option.rawValue))
+            .accessibilityLabel("Иконка " + option.title)
+    }
+    private var appearancePreview: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Предпросмотр").hidigFont(size: 12).foregroundStyle(HidigPalette.secondary)
+            SoftPanel {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Мой день").hidigFont(size: 16, weight: .semibold)
+                    ForEach(Array(store.visibleManagedTasks.prefix(2))) { task in
+                        HStack(alignment: .top, spacing: 9) {
+                            HidigCheckmarkBox(isChecked: task.status == .completed, size: 16)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(task.title).hidigFont(size: 14, weight: .medium).lineLimit(2)
+                                Text(task.scheduleLabel)
+                                    .hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+                            }
                         }
-                        .foregroundStyle(HidigPalette.forest)
-                        .padding(8)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
+                        Divider().overlay(HidigPalette.line)
                     }
-                    .buttonStyle(SelectionRowButtonStyle(isSelected: appIconRaw == option.rawValue))
+                    Text("Один шаг к важному").hidigFont(size: 13).padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(HidigPalette.lettuce).clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
-
-            Text("Во всех вариантах сохранён исходный знак hidigFocus без листьев; нижняя форма перенесена в центр. Если Dock показывает старую версию, удалите только значок hidigFocus из Dock и закрепите его заново.")
-                .hidigFont(size: 11)
-                .foregroundStyle(HidigPalette.secondary)
-
-            Button("Вернуть стандартное оформление", action: resetAppearance)
-                .buttonStyle(GhostButtonStyle())
+            Text("Кириллица, латиница, цифры").hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+            Text("Планы становятся яснее").hidigFont(size: 23, weight: .medium)
+            Text("Aa Бб Дд Жж · 0123456789").hidigFont(size: 12).foregroundStyle(HidigPalette.secondary)
         }
     }
 
@@ -182,12 +252,9 @@ struct SettingsView: View {
     }
 
     private var tickTickSection: some View {
-        settingsSection("Интеграции", description: "TickTick: \(store.connectionState.title)") {
-            HStack(spacing: 8) {
-                StatusDot(isActive: store.connectionState == .connected)
-                Text(lastSyncText).hidigFont(size: 11, weight: .medium)
-            }
-            SyncButton()
+        settingsSection("Импорт задач", description: "hidigFocus хранит задачи и работает самостоятельно. TickTick доступен как источник разового импорта.") {
+            Button("Открыть импорт из TickTick") { store.selectedSection = .tickTick }
+                .buttonStyle(SecondaryButtonStyle())
         }
     }
 
@@ -209,9 +276,9 @@ struct SettingsView: View {
 
     private var journalSection: some View {
         settingsSection("Журнал", description: "Локальные Markdown-файлы с автоматическим сохранением.") {
-            Text(store.journalSaveState.title)
+            Text(journal.journalSaveState.title)
                 .hidigFont(size: 11, weight: .medium)
-                .foregroundStyle(store.journalSaveState.isError ? HidigPalette.warning : HidigPalette.secondary)
+                .foregroundStyle(journal.journalSaveState.isError ? HidigPalette.warning : HidigPalette.secondary)
             Button("Открыть папку журнала") { store.revealJournalFolder() }.buttonStyle(SecondaryButtonStyle())
         }
     }
@@ -231,9 +298,8 @@ struct SettingsView: View {
     }
 
     private func settingLabel(_ title: String) -> some View {
-        Text(title.uppercased())
-            .hidigFont(size: 10, weight: .bold, design: .rounded)
-            .tracking(0.8)
+        Text(title)
+            .hidigFont(size: 12, weight: .semibold)
             .foregroundStyle(HidigPalette.secondary)
     }
 
@@ -248,11 +314,6 @@ struct SettingsView: View {
         }
     }
 
-    private var lastSyncText: String {
-        guard let date = store.state.lastSuccessfulSync else { return "Ещё не синхронизировано" }
-        return "Обновлено \(date.formatted(date: .omitted, time: .shortened))"
-    }
-
     private func updateLaunchAtLogin(_ enabled: Bool) {
         do {
             try LaunchAtLoginController.setEnabled(enabled)
@@ -264,28 +325,15 @@ struct SettingsView: View {
     }
 
     private func resetAppearance() {
-        appearanceRaw = AppearancePreference.system.rawValue
-        fontRaw = HidigFontPreference.system.rawValue
-        textSizeRaw = HidigTextSizePreference.standard.rawValue
-        sidebarColorRaw = SidebarColorPreference.ocean.rawValue
-        customSidebarColorHex = "#E5EFDA"
-        appIconRaw = AppIconPreference.green.rawValue
-
-        let defaults = UserDefaults.standard
-        defaults.set(AppearancePreference.system.rawValue, forKey: HidigSettingsKeys.appearance)
-        defaults.set(HidigFontPreference.system.rawValue, forKey: HidigSettingsKeys.font)
-        defaults.set(HidigTextSizePreference.standard.rawValue, forKey: HidigSettingsKeys.textSize)
-        defaults.set(SidebarColorPreference.ocean.rawValue, forKey: HidigSettingsKeys.sidebarColor)
-        defaults.set("#E5EFDA", forKey: HidigSettingsKeys.customSidebarColor)
-        defaults.set(AppIconPreference.green.rawValue, forKey: HidigSettingsKeys.appIcon)
-
-        AppAppearanceController.apply(.system)
-        AppIconController.apply(.green)
+        fontRaw = HidigFontPreference.golos.rawValue
+        sidebarColorRaw = SidebarColorPreference.paper.rawValue
+        appIconRaw = AppIconPreference.doors.rawValue
+        iconPackRaw = HidigIconPack.duotone.rawValue
     }
 
     private func persist(_ value: Any, forKey key: String) {
-        UserDefaults.standard.set(value, forKey: key)
-        UserDefaults.standard.synchronize()
+        HidigRuntime.defaults.set(value, forKey: key)
+        HidigRuntime.defaults.synchronize()
     }
 }
 
@@ -298,24 +346,23 @@ private struct ThemeChoiceCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: option.systemImage)
-                    Spacer()
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? HidigPalette.lettuceStrong : HidigPalette.secondary)
-                }
-                Text(option.title).hidigFont(size: 12, weight: .semibold)
+            HStack(spacing: 8) {
+                Image(systemName: option.systemImage)
+                Text(option.title).hidigFont(size: 12, weight: .medium)
+                Spacer(minLength: 0)
+                if isSelected { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)) }
             }
             .foregroundStyle(HidigPalette.forest)
-            .padding(13)
-            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
             .background(isSelected ? HidigPalette.lettuce.opacity(0.3) : (isHovered ? HidigPalette.hover : HidigPalette.surfaceRaised))
-            .overlay(RoundedRectangle(cornerRadius: 11).stroke(isSelected || isHovered ? HidigPalette.focusRing : HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 11))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(isSelected || isHovered ? HidigPalette.focusRing : HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityValue(isSelected ? "Выбрано" : "Не выбрано")
         .onHover { isHovered = $0 }
     }
 }
@@ -384,10 +431,12 @@ private struct PaletteChoiceCard: View {
             .foregroundStyle(HidigPalette.forest)
             .padding(9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(isSelected ? HidigPalette.focusRing : HidigPalette.line, lineWidth: isSelected ? 2 : 1))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(isSelected ? HidigPalette.focusRing : HidigPalette.line, lineWidth: isSelected ? 2 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityValue(isSelected ? "Выбрано" : "Не выбрано")
     }
 
     private func palettePreview(_ theme: HidigThemeColors, systemImage: String) -> some View {

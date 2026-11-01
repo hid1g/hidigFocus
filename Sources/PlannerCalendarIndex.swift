@@ -5,6 +5,7 @@ final class PlannerCalendarIndex {
     private let radius: Int
     init(radius: Int = 14) { self.radius = radius }
     private var tasks: [ManagedTask] = []
+    private var preparedCalendar: Calendar?
     private var first: Date?
     private var end: Date?
     private var buckets: [Date: [ManagedTask]] = [:]
@@ -13,22 +14,23 @@ final class PlannerCalendarIndex {
     func replaceTasks(_ tasks: [ManagedTask]) { self.tasks = tasks; first = nil; end = nil; buckets.removeAll(); projectedByID.removeAll() }
     func cachedDay(_ day: Date, calendar: Calendar = PlannerCalendar.current) -> [ManagedTask]? {
         let date = calendar.startOfDay(for: day)
-        guard let first, let end, date >= first && date < end else { return nil }
+        guard preparedCalendar == calendar, let first, let end, date >= first && date < end else { return nil }
         return buckets[date] ?? []
     }
     func day(_ day: Date, calendar: Calendar = PlannerCalendar.current) -> [ManagedTask] {
         let date = calendar.startOfDay(for: day)
-        if let first, let end, date >= first && date < end { return buckets[date] ?? [] }
+        if preparedCalendar == calendar, let first, let end, date >= first && date < end { return buckets[date] ?? [] }
         rebuild(around: date, calendar: calendar)
         return buckets[date] ?? []
     }
     private func rebuild(around date: Date, calendar: Calendar) {
         let first = calendar.date(byAdding: .day, value: -radius, to: date) ?? date
         let end = calendar.date(byAdding: .day, value: radius + 1, to: date) ?? date
+        preparedCalendar = calendar
         self.first = first; self.end = end; generation += 1
         buckets.removeAll(); projectedByID.removeAll()
         let existing = Set(tasks.map(\.id))
-        for task in RecurrenceProjection.tasks(tasks, from: first, to: end) where task.status == .active || task.status == .completed {
+        for task in RecurrenceProjection.tasks(tasks, from: first, to: end) where task.status == .active || task.status == .completed || task.status == .wontDo {
             guard let start = task.startDate ?? task.dueDate else { continue }
             if !existing.contains(task.id) { projectedByID[task.id] = task }
             var day = max(first, calendar.startOfDay(for: start))

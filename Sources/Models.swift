@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct ProtectedResourceChange: Identifiable {
-    enum Operation { case update(UUID, String, String), remove(UUID), removeGroup, applyGroupRule }
+    enum Operation { case update(UUID, String, String), remove(UUID), removeGroup, applyGroupRule, disableGroup }
     let id = UUID()
     let groupID: UUID
     let operation: Operation
@@ -12,7 +12,16 @@ struct ProtectedResourceChange: Identifiable {
         case .remove: return "Удалить домен?"
         case .removeGroup: return "Удалить группу с доменами?"
         case .applyGroupRule: return "Изменить домены группы?"
+        case .disableGroup: return "Отключить правило?"
         }
+    }
+    var confirmationWord: String {
+        if case .disableGroup = operation { return "ОТКЛЮЧИТЬ" }
+        return "ПОДТВЕРДИТЬ"
+    }
+    var confirmationButtonTitle: String {
+        if case .disableGroup = operation { return "Обнулить серии и отключить" }
+        return "Обнулить серии и подтвердить"
     }
 }
 
@@ -678,6 +687,7 @@ struct PersistedAppState: Codable {
 }
 
 enum TickTickConnectionState: Equatable {
+    case notRequested
     case checking
     case cliMissing
     case signedOut
@@ -687,6 +697,7 @@ enum TickTickConnectionState: Equatable {
 
     var title: String {
         switch self {
+        case .notRequested: return "Импорт по запросу"
         case .checking: return "Проверяем подключение"
         case .cliMissing: return "Нужен TickTick CLI"
         case .signedOut: return "Требуется вход"

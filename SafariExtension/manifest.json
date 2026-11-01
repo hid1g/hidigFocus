@@ -1,16 +1,20 @@
 {
   "manifest_version": 3,
   "name": "hidigFocus Safari Guard",
-  "version": "0.3.1",
+  "version": "0.5.1",
   "description": "Применяет группы блокировки hidigFocus в Safari.",
   "permissions": [
     "alarms",
     "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
     "storage"
   ],
   "host_permissions": [
-    "http://127.0.0.1:17321/*",
-    "<all_urls>"
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -22,12 +26,11 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "hidigFocus"
+    "default_title": "hidigFocus",
+    "default_popup": "popup.html"
   },
-  "web_accessible_resources": [
-    {
-      "resources": ["blocked.html", "blocked.css", "blocked.js", "icons/icon128.png"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "web_accessible_resources": [{
+    "resources": ["blocked.html", "blocked.css", "blocked.js", "icons/icon128.png"],
+    "matches": ["http://*/*", "https://*/*"]
+  }]
 }

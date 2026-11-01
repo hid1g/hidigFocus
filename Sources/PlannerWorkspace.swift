@@ -14,6 +14,7 @@ final class PlannerWorkspace: ObservableObject {
     @Published var sort: PlannerSort = .date
     @Published var presentation: TasksPresentation = .list
     @Published var mode: TaskCalendarMode = .fourDays
+    @Published var customDayCount = 4
     @Published var anchor = Date()
     @Published var cancellationToken = 0
     @Published var lastSelectedID: UUID?
@@ -21,7 +22,7 @@ final class PlannerWorkspace: ObservableObject {
     private let defaults: UserDefaults
     private var cancellables: Set<AnyCancellable> = []
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = HidigRuntime.defaults) {
         self.defaults = defaults
         if let data = defaults.data(forKey: "planner.filter"), let saved = try? JSONDecoder().decode(PlannerFilter.self, from: data) { filter = saved }
         // Restore history hidden by the previous default once; subsequent choices persist.
@@ -33,12 +34,15 @@ final class PlannerWorkspace: ObservableObject {
         sort = PlannerSort(rawValue: defaults.string(forKey: "planner.sort") ?? "") ?? .date
         presentation = TasksPresentation(rawValue: defaults.string(forKey: "planner.presentation") ?? "") ?? .list
         mode = TaskCalendarMode(rawValue: defaults.string(forKey: "planner.mode") ?? "") ?? .fourDays
+        let savedDayCount = defaults.integer(forKey: "planner.customDayCount")
+        customDayCount = CalendarDayCount.clamp(savedDayCount == 0 ? 4 : savedDayCount)
         if let saved = defaults.object(forKey: "planner.anchor") as? Date { anchor = saved }
         search = defaults.string(forKey: "planner.search") ?? ""
         $filter.dropFirst().sink { if let data = try? JSONEncoder().encode($0) { defaults.set(data, forKey: "planner.filter") } }.store(in: &cancellables)
         $sort.dropFirst().sink { defaults.set($0.rawValue, forKey: "planner.sort") }.store(in: &cancellables)
         $presentation.dropFirst().sink { defaults.set($0.rawValue, forKey: "planner.presentation") }.store(in: &cancellables)
         $mode.dropFirst().sink { defaults.set($0.rawValue, forKey: "planner.mode") }.store(in: &cancellables)
+        $customDayCount.dropFirst().sink { defaults.set(CalendarDayCount.clamp($0), forKey: "planner.customDayCount") }.store(in: &cancellables)
         $anchor.dropFirst().debounce(for: .milliseconds(300), scheduler: RunLoop.main).sink { defaults.set($0, forKey: "planner.anchor") }.store(in: &cancellables)
         $search.dropFirst().debounce(for: .milliseconds(300), scheduler: RunLoop.main).sink { defaults.set($0, forKey: "planner.search") }.store(in: &cancellables)
     }
@@ -61,9 +65,8 @@ struct PlannerFilter: Codable, Equatable {
     var isActive: Bool { !listIDs.isEmpty || priority != nil || !showLocal || !showImported || !showEvents || !showCompleted }
 
     func matches(_ task: ManagedTask, search: String, includeTrash: Bool = false, includeCompleted: Bool = false) -> Bool {
-        guard task.status != .wontDo,
-              (includeTrash ? task.status == .trashed : task.status != .trashed),
-              task.status != .completed || showCompleted || includeCompleted,
+        guard (includeTrash ? task.status == .trashed : task.status != .trashed),
+              (task.status != .completed && task.status != .wontDo) || showCompleted || includeCompleted,
               listIDs.isEmpty || listIDs.contains(task.listID),
               priority == nil || task.priority == priority,
               (task.sourceID == nil && task.sourceName != "TickTick") ? showLocal : showImported else { return false }
@@ -110,21 +113,27 @@ enum RecurrenceProjection {
         return UUID(uuid: (b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14],b[15]))
     }
     static func tasks(_ tasks: [ManagedTask], from first: Date, to end: Date) -> [ManagedTask] {
-        var result = tasks.filter {
+        var result = tasks.map(TaskSeriesEditing.displayedRoot).filter {
             guard let start = $0.startDate ?? $0.dueDate else { return false }
-            if $0.seriesRootID == nil && ($0.excludedOccurrences ?? []).contains(start) { return false }
+            if $0.seriesVersions != nil && $0.seriesRootID == nil && $0.status == .active && $0.sourceUnavailable != true { return false }
+            if $0.seriesRootID == nil && ($0.excludedOccurrences ?? []).contains($0.occurrenceDate ?? start) { return false }
             return start < end && ($0.calendarEndDate ?? start.addingTimeInterval(900)) > first
         }
         let saved = Set(tasks.compactMap { task -> String? in
             guard let root = task.seriesRootID, let date = task.occurrenceDate else { return nil }
             return "\(root):\(Int64(date.timeIntervalSince1970))"
         })
-        for root in tasks where root.seriesRootID == nil && root.status != .trashed && root.status != .wontDo {
+        for root in tasks where root.seriesRootID == nil && root.status != .trashed &&
+            !(root.status == .wontDo && root.tickTickBaseline?.isAbandoned == true) {
             // Retain the saved task and its history, but never invent occurrences
             // for a missing source or an ancestor fetched only to repair hierarchy.
             guard root.sourceUnavailable != true, root.tickTickBaseline?.isHierarchyContext != true,
-                  let storedRule = root.repeatRule, let rule = supportedRule(storedRule),
                   let start = root.startDate ?? root.dueDate else { continue }
+            if root.seriesVersions != nil {
+                result.append(contentsOf: versionTasks(root, saved: saved, from: first, to: end))
+                continue
+            }
+            guard let storedRule = root.repeatRule, let rule = supportedRule(storedRule) else { continue }
             var calendar = Calendar.current
             calendar.timeZone = TimeZone(identifier: root.timeZoneID) ?? .current
             var cursor = start
@@ -151,6 +160,47 @@ enum RecurrenceProjection {
         }
         return result
     }
+    private static func versionTasks(_ root: ManagedTask, saved: Set<String>, from first: Date, to end: Date) -> [ManagedTask] {
+        let versions = TaskSeriesEditing.versions(of: root)
+        let base = versions.first?.from
+        var result: [ManagedTask] = []
+        for i in versions.indices {
+            let version = versions[i], template = version.template
+            guard let anchor = template.startDate ?? template.dueDate else { continue }
+            let calendar = TaskSeriesEditing.calendar(for: template)
+            let limit = i + 1 < versions.count ? versions[i + 1].from : Date.distantFuture
+            let rule = template.repeatRule.flatMap(supportedRule)
+            var cursor = anchor
+            var iterations = 0
+            while cursor < end && iterations < 100_000 {
+                iterations += 1
+                let identity = TaskSeriesEditing.shifted(cursor, from: anchor, to: version.from, calendar: calendar)
+                if identity >= limit { break }
+                let isBase = identity == base
+                if cursor.addingTimeInterval(Double(template.durationMinutes * 60)) > first,
+                   !(root.excludedOccurrences ?? []).contains(identity),
+                   !saved.contains("\(root.id):\(Int64(identity.timeIntervalSince1970))"),
+                   !(isBase && root.status != .active) {
+                    var copy = template
+                    copy.id = isBase ? root.id : occurrenceID(root: root.id, date: identity)
+                    copy.seriesRootID = root.id; copy.occurrenceDate = identity
+                    copy.startDate = cursor
+                    copy.plannedEndDate = template.isAllDay ? nil : cursor.addingTimeInterval(Double(template.durationMinutes * 60))
+                    copy.dueDate = template.dueDate.map { $0.addingTimeInterval(cursor.timeIntervalSince(anchor)) }
+                    copy.status = .active; copy.completedAt = nil; copy.nextOccurrenceID = nil
+                    copy.repeatRule = nil; copy.excludedOccurrences = nil; copy.seriesVersions = nil
+                    copy.sourceID = nil; copy.tickTickBaseline = nil
+                    copy.googleEventID = nil; copy.googleCalendarID = nil; copy.googleETag = nil
+                    copy.checklist = copy.checklist.map { var item = $0; item.isCompleted = false; return item }
+                    result.append(copy)
+                }
+                guard let rule, let next = TaskEngine.nextOccurrence(after: cursor, for: rule, calendar: calendar), next > cursor else { break }
+                cursor = next
+            }
+        }
+        return result
+    }
+
 }
 
 struct QuickTaskInput {

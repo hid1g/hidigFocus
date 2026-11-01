@@ -1,0 +1,161 @@
+{
+  "name": "hidigFocus / Print",
+  "version": "1.0-review",
+  "units": "logical macOS points",
+  "color": {
+    "light": {
+      "canvas": "#F7F3EA",
+      "surface": "#FFFDF7",
+      "surfaceRaised": "#EEE8DC",
+      "text": "#203747",
+      "secondary": "#67716F",
+      "line": "#DCD8CD",
+      "grid": "#EAE5DA",
+      "accent": "#BC492F",
+      "onAccent": "#FFFDF9",
+      "selection": "#F4E1D5",
+      "eventBlue": "#DFE9EF",
+      "eventBlueText": "#314E63",
+      "eventGreen": "#E4EBDF",
+      "eventGreenText": "#40583C",
+      "eventGold": "#F1E8D3",
+      "eventGoldText": "#69582E",
+      "eventPurple": "#E8E4EE",
+      "eventPurpleText": "#5B4C70",
+      "sidebar": "#17384D",
+      "sidebarText": "#F3ECDD",
+      "sidebarSelected": "#2D5267"
+    },
+    "dark": {
+      "canvas": "#1C2B36",
+      "surface": "#253844",
+      "surfaceRaised": "#2E4452",
+      "text": "#EEE9DF",
+      "secondary": "#B6C0C1",
+      "line": "#435663",
+      "grid": "#324652",
+      "accent": "#EC9877",
+      "onAccent": "#35251C",
+      "selection": "#533F37",
+      "eventBlue": "#354F64",
+      "eventBlueText": "#D5E6F1",
+      "eventGreen": "#3A4C3C",
+      "eventGreenText": "#DCEBD4",
+      "eventGold": "#514831",
+      "eventGoldText": "#ECE1BC",
+      "eventPurple": "#463E53",
+      "eventPurpleText": "#E5DCEF",
+      "sidebar": "#17384D",
+      "sidebarText": "#F3ECDD",
+      "sidebarSelected": "#2D5267"
+    }
+  },
+  "typography": {
+    "screen": {
+      "fontFamily": "Golos Text",
+      "fontSize": 22,
+      "lineHeight": 27,
+      "fontWeight": 600
+    },
+    "section": {
+      "fontFamily": "Golos Text",
+      "fontSize": 16,
+      "lineHeight": 23,
+      "fontWeight": 500
+    },
+    "task": {
+      "fontFamily": "Golos Text",
+      "fontSize": 14,
+      "lineHeight": 21,
+      "fontWeight": 500
+    },
+    "body": {
+      "fontFamily": "Golos Text",
+      "fontSize": 13,
+      "lineHeight": 20,
+      "fontWeight": 400
+    },
+    "control": {
+      "fontFamily": "Golos Text",
+      "fontSize": 12,
+      "lineHeight": 17,
+      "fontWeight": 500
+    },
+    "event": {
+      "fontFamily": "Golos Text",
+      "fontSize": 12,
+      "lineHeight": 16,
+      "fontWeight": 500
+    },
+    "meta": {
+      "fontFamily": "Golos Text",
+      "fontSize": 11,
+      "lineHeight": 16,
+      "fontWeight": 400
+    },
+    "timer": {
+      "fontFamily": "Golos Text",
+      "fontSize": 78,
+      "lineHeight": 86,
+      "fontWeight": 400
+    }
+  },
+  "radius": {
+    "event": 4,
+    "control": 5,
+    "panel": 7,
+    "window": 10,
+    "popover": 11
+  },
+  "space": [
+    2,
+    4,
+    6,
+    8,
+    12,
+    16,
+    18,
+    24,
+    32,
+    40,
+    48
+  ],
+  "size": {
+    "sidebar": 154,
+    "sidebarCompact": 58,
+    "taskLists": 174,
+    "buttonSmall": 28,
+    "buttonMedium": 32,
+    "buttonLarge": 40,
+    "input": 38,
+    "popover": 380,
+    "sheet": 440,
+    "calendarHourDefault": 96,
+    "calendarHourAlternative": 120
+  },
+  "motion": {
+    "hoverMs": 120,
+    "stateMs": 180,
+    "panelMs": 240,
+    "reduceMotion": "remove nonessential transitions"
+  },
+  "layout": {
+    "desktop": {
+      "width": 1440,
+      "height": 960
+    },
+    "compact": {
+      "width": 760,
+      "height": 960
+    },
+    "componentSheet": {
+      "width": 1440,
+      "height": 1080
+    },
+    "breakpoints": {
+      "navigationCompact": 870,
+      "stackPanels": 660,
+      "stackContent": 520
+    }
+  }
+}

@@ -23,13 +23,17 @@ let package = Package(
             exclude: ["Resources/SafariExtension"],
             resources: [
                 .process("Resources/hidigFocus-icon-master.png"),
-                .copy("Resources/BrowserExtension")
+                .copy("Resources/BrowserExtension"),
+                .copy("Resources/Fonts"),
+                .copy("Resources/PrintIcons"),
+                .copy("Resources/PrintTokens.json")
             ]
         ),
         .testTarget(
             name: "hidigFocusTests",
             dependencies: ["hidigFocus", "CSQLite"],
-            path: "Tests"
+            path: "Tests",
+            exclude: ["SafariExtensionTests.cjs"]
         )
     ]
 )

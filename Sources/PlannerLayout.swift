@@ -19,6 +19,13 @@ struct PlannerInterval: Equatable {
 struct PlannerPlacement: Equatable {
     let lane: Int
     let laneCount: Int
+    let span: Int
+
+    init(lane: Int, laneCount: Int, span: Int = 1) {
+        self.lane = lane
+        self.laneCount = laneCount
+        self.span = span
+    }
 }
 
 enum PlannerLayout {
@@ -30,11 +37,21 @@ enum PlannerLayout {
             return $0.id < $1.id
         }
         var result: [String: PlannerPlacement] = [:]
-        var group: [(String, Int)] = []
+        var group: [(PlannerInterval, Int)] = []
         var laneEnds: [Double] = []
         var groupEnd = -Double.infinity
         func finish() {
-            for (id, lane) in group { result[id] = PlannerPlacement(lane: lane, laneCount: laneEnds.count) }
+            for (interval, lane) in group {
+                var span = 1
+                while lane + span < laneEnds.count {
+                    let blocked = group.contains {
+                        $0.1 == lane + span && $0.0.start < interval.end && interval.start < $0.0.end
+                    }
+                    if blocked { break }
+                    span += 1
+                }
+                result[interval.id] = PlannerPlacement(lane: lane, laneCount: laneEnds.count, span: span)
+            }
         }
         for interval in sorted {
             if interval.start >= groupEnd {
@@ -46,7 +63,7 @@ enum PlannerLayout {
             let lane = laneEnds.firstIndex { $0 <= interval.start } ?? laneEnds.count
             if lane == laneEnds.count { laneEnds.append(interval.end) }
             else { laneEnds[lane] = interval.end }
-            group.append((interval.id, lane))
+            group.append((interval, lane))
             groupEnd = max(interval.end, groupEnd)
         }
         finish()

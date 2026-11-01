@@ -23,8 +23,8 @@ struct GroupsView: View {
                     .buttonStyle(PrimaryButtonStyle())
             }
 
-            HStack(alignment: .top, spacing: 22) {
-                groupsList.frame(width: 255)
+            VStack(alignment: .leading, spacing: 18) {
+                ScrollView(.horizontal, showsIndicators: false) { groupsList }
                 if let group = store.selectedGroup {
                     groupEditor(group)
                 } else {
@@ -33,8 +33,8 @@ struct GroupsView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 36)
-        .padding(.top, 36)
+        .padding(.horizontal, 22)
+        .padding(.top, 30)
         .padding(.bottom, 38)
         .sheet(isPresented: $showsNewGroup) { NewGroupSheet(isPresented: $showsNewGroup) }
         .sheet(isPresented: $showsAddDomain) {
@@ -57,7 +57,7 @@ struct GroupsView: View {
     }
 
     private var groupsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             ForEach(store.groups) { group in
                 let applied = store.appliedGroup(group.id) ?? group
                 Button {
@@ -81,6 +81,7 @@ struct GroupsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(SelectionRowButtonStyle(isSelected: store.selectedGroupID == group.id))
+                .frame(width: 180)
                 .contextMenu {
                     Button("Переименовать") {
                         groupToRename = GroupRenameTarget(group: group)
@@ -104,7 +105,7 @@ struct GroupsView: View {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(group.name)
-                            .hidigFont(size: 24, weight: .bold, design: .rounded)
+                            .hidigFont(size: 20, weight: .semibold)
                             .foregroundStyle(HidigPalette.forest)
                         Text(applied.isEnabled
                             ? (store.groupIsUnlocked(applied) ? "Сейчас открыта" : "Сейчас закрыта")
@@ -163,8 +164,8 @@ struct GroupsView: View {
                     }
                     .padding(14)
                     .background(HidigPalette.canvas)
-                    .overlay(RoundedRectangle(cornerRadius: 13).stroke(HidigPalette.line))
-                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
                 }
 
                 VStack(alignment: .leading, spacing: 13) {
@@ -177,7 +178,7 @@ struct GroupsView: View {
                     ForEach(group.resources) { resource in
                         HStack(spacing: 13) {
                             Text(resource.shortLabel)
-                                .hidigFont(size: 10, weight: .bold, design: .rounded)
+                                .hidigFont(size: 10, weight: .bold)
                                 .frame(width: 34, height: 34)
                                 .background(HidigPalette.lettuce.opacity(0.3))
                                 .clipShape(Circle())
@@ -193,11 +194,13 @@ struct GroupsView: View {
                             } label: { Image(systemName: "pencil") }
                                 .buttonStyle(HidigIconButtonStyle())
                                 .help("Редактировать")
+                                .accessibilityLabel("Редактировать ресурс \(resource.displayName)")
                             Button {
                                 store.removeResource(resource.id, from: group.id)
                             } label: { Image(systemName: "xmark") }
                                 .buttonStyle(HidigIconButtonStyle())
                                 .help("Удалить")
+                                .accessibilityLabel("Удалить ресурс \(resource.displayName)")
                         }
                         .padding(.vertical, 5)
                     }
@@ -231,14 +234,14 @@ struct GroupsView: View {
 
                         if !group.requiresAllTodayTasks {
                             if store.todayTasks.isEmpty {
-                                Text("Добавьте задачу hidigFocus или подключите TickTick.")
+                                Text("Добавьте задачу в hidigFocus.")
                                     .hidigFont(size: 12)
                                     .foregroundStyle(HidigPalette.secondary)
                             } else {
                                 TaskSelectionList(group: group)
                             }
                         }
-                        Text("Если нужных задач нет, группа остаётся закрытой. Локальные задачи работают без подключения TickTick.")
+                        Text("Если нужных задач нет, группа остаётся закрытой. Выполнение учитывается в hidigFocus.")
                                 .hidigFont(size: 12)
                                 .foregroundStyle(HidigPalette.secondary)
                     }
@@ -256,8 +259,8 @@ struct GroupsView: View {
             .padding(24)
         }
         .background(HidigPalette.surface)
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HidigPalette.line))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private func chooseApplication(for groupID: UUID) {
@@ -318,8 +321,7 @@ private struct TaskSelectionList: View {
             HStack(spacing: 8) {
                 TextField("Поиск задачи", text: $search)
                     .textFieldStyle(HidigTextFieldStyle())
-                SyncButton(showTitle: false)
-            }
+                }
 
             HStack(spacing: 6) {
                 ForEach(TaskListFilter.allCases) { option in
@@ -358,7 +360,7 @@ private struct TaskSelectionList: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(section.project.uppercased())
-                                .hidigFont(size: 10, weight: .bold, design: .rounded)
+                                .hidigFont(size: 10, weight: .bold)
                                 .tracking(0.7)
                                 .foregroundStyle(HidigPalette.secondary)
                             Spacer()
@@ -509,8 +511,8 @@ private struct BlockScheduleEditor: View {
         }
         .padding(14)
         .background(HidigPalette.canvas)
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(HidigPalette.line))
-        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private var allDayBinding: Binding<Bool> {
@@ -597,6 +599,7 @@ private struct ScheduleChoiceButtonStyle: ButtonStyle {
 }
 
 private struct ScheduleChoiceButtonBody<Label: View>: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @State private var isHovered = false
 
@@ -606,25 +609,23 @@ private struct ScheduleChoiceButtonBody<Label: View>: View {
 
     var body: some View {
         label
-            .foregroundStyle(isSelected ? Color.white : HidigPalette.forest)
+            .foregroundStyle(isSelected ? HidigPalette.onAccent : HidigPalette.forest)
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .stroke(isSelected ? HidigPalette.controlFill : HidigPalette.line, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(Rectangle())
-            .scaleEffect(isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
-            .animation(.easeOut(duration: 0.12), value: isPressed)
+            .scaleEffect(isPressed && !reduceMotion ? 0.985 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isPressed)
             .onHover { isHovered = $0 }
     }
 
     private var background: Color {
         if isSelected {
-            return isHovered || isPressed
-                ? HidigPalette.controlFill.opacity(0.86)
-                : HidigPalette.controlFill
+            return HidigPalette.controlFill
         }
         return isHovered || isPressed
             ? HidigPalette.hover.opacity(0.72)
@@ -645,10 +646,10 @@ private struct TaskRequirementSelector: View {
         .padding(5)
         .background(HidigPalette.canvas)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .stroke(HidigPalette.line)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 
     private func option(_ title: String, value: Bool) -> some View {
@@ -680,7 +681,7 @@ private struct NewGroupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Новая группа")
-                .hidigFont(size: 26, weight: .bold, design: .rounded)
+                .hidigFont(size: 26, weight: .bold)
             TextField("Например, Видео и соцсети", text: $name)
                 .textFieldStyle(HidigTextFieldStyle())
             HStack {
@@ -716,7 +717,7 @@ private struct RenameGroupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Переименовать группу")
-                .hidigFont(size: 26, weight: .bold, design: .rounded)
+                .hidigFont(size: 26, weight: .bold)
             TextField("Название группы", text: $name)
                 .textFieldStyle(HidigTextFieldStyle())
                 .onSubmit(save)
@@ -748,11 +749,12 @@ private struct AddDomainSheet: View {
     @Binding var isPresented: Bool
     @State private var name = ""
     @State private var domain = ""
+    @State private var validationError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Добавить сайт")
-                .hidigFont(size: 26, weight: .bold, design: .rounded)
+                .hidigFont(size: 26, weight: .bold)
             TextField("Название, например YouTube", text: $name)
                 .textFieldStyle(HidigTextFieldStyle())
             TextField("Домен, например youtube.com", text: $domain)
@@ -760,6 +762,12 @@ private struct AddDomainSheet: View {
             Text("Поддомены этого домена также будут закрыты.")
                 .hidigFont(size: 11)
                 .foregroundStyle(HidigPalette.secondary)
+            if let validationError {
+                Label(validationError, systemImage: "exclamationmark.circle")
+                    .hidigFont(size: 12).foregroundStyle(HidigPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Ошибка: \(validationError)")
+            }
             HStack {
                 Button("Отмена") { isPresented = false }.buttonStyle(SecondaryButtonStyle())
                 Spacer()
@@ -768,15 +776,17 @@ private struct AddDomainSheet: View {
                         try store.addDomain(domain, displayName: name, to: groupID)
                         isPresented = false
                     } catch {
-                        store.errorMessage = error.localizedDescription
+                        validationError = error.localizedDescription
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle())
+                .disabled(domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(28)
         .frame(width: 440)
         .background(HidigPalette.canvas)
+        .onChange(of: domain) { _ in validationError = nil }
     }
 }
 
@@ -787,6 +797,7 @@ private struct EditResourceSheet: View {
     @Binding var isPresented: Bool
     @State private var name: String
     @State private var identifier: String
+    @State private var validationError: String?
 
     init(target: ResourceEditTarget, isPresented: Binding<Bool>) {
         self.target = target
@@ -798,7 +809,7 @@ private struct EditResourceSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Редактировать \(target.resource.kind == .domain ? "сайт" : "приложение")")
-                .hidigFont(size: 26, weight: .bold, design: .rounded)
+                .hidigFont(size: 26, weight: .bold)
             TextField("Название", text: $name)
                 .textFieldStyle(HidigTextFieldStyle())
             TextField(identifierPlaceholder, text: $identifier)
@@ -807,6 +818,12 @@ private struct EditResourceSheet: View {
                 .hidigFont(size: 11)
                 .foregroundStyle(HidigPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let validationError {
+                Label(validationError, systemImage: "exclamationmark.circle")
+                    .hidigFont(size: 12).foregroundStyle(HidigPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Ошибка: \(validationError)")
+            }
             HStack {
                 Button("Отмена") { isPresented = false }
                     .buttonStyle(SecondaryButtonStyle())
@@ -820,6 +837,7 @@ private struct EditResourceSheet: View {
         .frame(width: 440)
         .foregroundStyle(HidigPalette.forest)
         .background(HidigPalette.canvas)
+        .onChange(of: identifier) { _ in validationError = nil }
     }
 
     private var identifierPlaceholder: String {
@@ -842,7 +860,7 @@ private struct EditResourceSheet: View {
             )
             isPresented = false
         } catch {
-            store.errorMessage = error.localizedDescription
+            validationError = error.localizedDescription
         }
     }
 }

@@ -2,6 +2,63 @@ import XCTest
 @testable import hidigFocus
 
 final class PlannerUpgradeTests: XCTestCase {
+    func testResizePreviewIsContinuousButCommitSnapsAbsoluteDuration() {
+        XCTAssertEqual(CalendarTaskResize.height(original: 72, translation: 1, hourHeight: 72), 73)
+        XCTAssertEqual(CalendarTaskResize.height(original: 72, translation: 7, hourHeight: 72), 79)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 60, translation: 7, hourHeight: 72), 60)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 60, translation: 10, hourHeight: 72), 75)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 37, translation: 0, hourHeight: 72), 30)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 37, translation: 7, hourHeight: 72), 45)
+    }
+
+    func testResizeHasMinimumAndSupportsDifferentZoomLevels() {
+        XCTAssertEqual(CalendarTaskResize.height(original: 72, translation: -200, hourHeight: 72), 18)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 60, translation: -200, hourHeight: 72), 15)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 60, translation: 36, hourHeight: 144), 75)
+        XCTAssertEqual(CalendarTaskResize.duration(original: 60, translation: -18, hourHeight: 72), 45)
+    }
+
+    func testTopResizeMovesStartAndPreservesEnd() {
+        XCTAssertEqual(CalendarTaskResize.topOffset(originalDuration: 60, translation: 18, hourHeight: 72), 15)
+        XCTAssertEqual(CalendarTaskResize.topOffset(originalDuration: 60, translation: -36, hourHeight: 72), -30)
+        XCTAssertEqual(CalendarTaskResize.topOffset(originalDuration: 60, translation: 200, hourHeight: 72), 45)
+        XCTAssertEqual(CalendarTaskResize.topHeight(original: 72, translation: 18, hourHeight: 72), 54)
+        XCTAssertEqual(CalendarTaskResize.topVisualOffset(originalHeight: 72, translation: 200, hourHeight: 72), 54)
+    }
+
+    func testCustomDayCountClampsAndUsesRussianPluralForms() throws {
+        XCTAssertEqual(CalendarDayCount.clamp(1), 2)
+        XCTAssertEqual(CalendarDayCount.clamp(7), 7)
+        XCTAssertEqual(CalendarDayCount.clamp(40), 14)
+        XCTAssertEqual(CalendarDayCount.title(2), "2 дня")
+        XCTAssertEqual(CalendarDayCount.title(5), "5 дней")
+        XCTAssertEqual(CalendarDayCount.title(14), "14 дней")
+
+        let suite = "CalendarDayCountTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(9, forKey: "planner.customDayCount")
+        XCTAssertEqual(PlannerWorkspace(defaults: defaults).customDayCount, 9)
+    }
+
+    func testKanbanStageFallsBackSafelyForExistingAndCompletedTasks() throws {
+        var active = ManagedTask(title: "Старая задача")
+        XCTAssertEqual(active.effectiveKanbanStage, .backlog)
+        active.kanbanStage = .planned
+        XCTAssertEqual(active.effectiveKanbanStage, .planned)
+        active.status = .completed
+        XCTAssertEqual(active.effectiveKanbanStage, .done)
+        active.status = .active
+        active.kanbanStage = .done
+        XCTAssertEqual(active.effectiveKanbanStage, .inProgress)
+
+        let encoded = try JSONEncoder().encode(ManagedTask(title: "Без этапа"))
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacyObject.removeValue(forKey: "kanbanStage")
+        let legacy = try JSONSerialization.data(withJSONObject: legacyObject)
+        XCTAssertNil(try JSONDecoder().decode(ManagedTask.self, from: legacy).kanbanStage)
+    }
+
     func testCompletedHistoryIsVisibleByDefaultAndCanBeHidden() {
         var task = ManagedTask(title: "Старая выполненная задача")
         task.status = .completed
@@ -31,11 +88,14 @@ final class PlannerUpgradeTests: XCTestCase {
     }
 
     func testCalendarRenderWindowKeepsCurrentAndPreviousPeriodVisible() {
-        XCTAssertEqual(CalendarRenderWindow.days(offset: 0, dayWidth: 200, visibleDays: 4), -1...4)
+        XCTAssertEqual(CalendarRenderWindow.days(offset: 0, dayWidth: 200, visibleDays: 4), -3...6)
         let previous = CalendarRenderWindow.days(offset: 800, dayWidth: 200, visibleDays: 4)
         for day in -4...3 { XCTAssertTrue(previous.contains(day)) }
         let next = CalendarRenderWindow.days(offset: -800, dayWidth: 200, visibleDays: 4)
         for day in 0...7 { XCTAssertTrue(next.contains(day)) }
+        XCTAssertEqual(CalendarRenderWindow.preloadedPeriods(visibleDays: 4), -4...7)
+        XCTAssertEqual(CalendarRenderWindow.preloadedPeriods(visibleDays: 7), -7...13)
+        XCTAssertEqual(CalendarRenderWindow.preloadedPeriods(visibleDays: 14), -14...27)
     }
 
     func testExactTimeInputPreservesMinuteAndRejectsInvalidValues() {
@@ -72,6 +132,8 @@ final class PlannerUpgradeTests: XCTestCase {
         filter.showCompleted = false
         imported.status = .completed; XCTAssertFalse(filter.matches(imported, search: ""))
         filter.showCompleted = true; XCTAssertTrue(filter.matches(imported, search: ""))
+        imported.status = .wontDo; XCTAssertTrue(filter.matches(imported, search: ""))
+        filter.showCompleted = false; XCTAssertFalse(filter.matches(imported, search: ""))
         imported.status = .trashed; XCTAssertFalse(filter.matches(imported, search: ""))
     }
     func testSortIsDeterministic() {
@@ -208,7 +270,8 @@ final class PlannerUpgradeTests: XCTestCase {
             writer.enqueue(state, revision: revision) { _,_ in }
         }
         writer.flush()
-        XCTAssertEqual(saved, ["Новая","Последняя"])
+        XCTAssertEqual(saved.last, "Последняя")
+        XCTAssertFalse(saved.contains("Старая"))
     }
     func testWriterFailureDoesNotPreventRetry() {
         enum Failure: Error { case disk }

@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct TodayView: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
+    @EnvironmentObject private var integration: IntegrationState
     @EnvironmentObject private var store: AppStore
     @State private var selectedProjectID = "all"
     @State private var showsCompletedTasks = false
@@ -13,8 +15,8 @@ struct TodayView: View {
                 HStack(alignment: .top) {
                     PageTitle(
                         eyebrow: formattedDate,
-                        title: "Сначала дела.",
-                        subtitle: "Развлечения останутся за воротами, пока задачи на сегодня не завершены."
+                        title: "Сегодня",
+                        subtitle: formattedDate
                     )
                     Spacer()
                     disciplineBadge
@@ -24,8 +26,8 @@ struct TodayView: View {
                 tasksSection
                 habitsSection
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 36)
+            .padding(.horizontal, 22)
+            .padding(.top, 30)
             .padding(.bottom, 50)
             .frame(maxWidth: 1050, alignment: .leading)
         }
@@ -34,7 +36,7 @@ struct TodayView: View {
     private var disciplineBadge: some View {
         VStack(alignment: .trailing, spacing: 3) {
             Text("\(store.disciplineStreak)")
-                .hidigFont(size: 29, weight: .bold, design: .rounded)
+                .hidigFont(size: 29, weight: .bold)
                 .foregroundStyle(HidigPalette.forest)
             Text("\(RussianPluralizer.form(store.disciplineStreak, one: "день", few: "дня", many: "дней")) дисциплины")
                 .hidigFont(size: 11, weight: .medium)
@@ -66,7 +68,7 @@ struct TodayView: View {
                     HStack(spacing: 7) {
                         ForEach(group.resources.prefix(5)) { resource in
                             Text(resource.shortLabel)
-                                .hidigFont(size: 10, weight: .bold, design: .rounded)
+                                .hidigFont(size: 10, weight: .bold)
                                 .foregroundStyle(HidigPalette.forest)
                                 .frame(width: 30, height: 30)
                                 .background(HidigPalette.canvas)
@@ -83,8 +85,8 @@ struct TodayView: View {
         }
         .padding(.horizontal, 22)
         .background(HidigPalette.surface)
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HidigPalette.line, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     @ViewBuilder
@@ -100,21 +102,7 @@ struct TodayView: View {
                     leadingIcon: "tray.full"
                 )
                 .frame(maxWidth: 190)
-                if let date = store.state.lastSuccessfulSync {
-                    Text("Обновлено \(date.formatted(date: .omitted, time: .shortened))")
-                        .hidigFont(size: 10, weight: .medium)
-                        .foregroundStyle(HidigPalette.secondary)
-                }
-                SyncButton(showTitle: false)
-            }
 
-            HStack(spacing: 9) {
-                TextField("Новая задача hidigFocus", text: $newLocalTaskTitle)
-                    .textFieldStyle(HidigTextFieldStyle())
-                    .onSubmit(addLocalTask)
-                Button("Добавить", action: addLocalTask)
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(newLocalTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .frame(maxWidth: 600)
 
@@ -144,7 +132,7 @@ struct TodayView: View {
                     DisclosureGroup(isExpanded: Binding(
                         get: { showsCompletedTasks },
                         set: { value in
-                            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.9)) {
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: PrintDesign.state)) {
                                 showsCompletedTasks = value
                             }
                         }
@@ -155,7 +143,7 @@ struct TodayView: View {
                             }
                         }
                         .padding(.top, 14)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
                     } label: {
                         Text("Выполнено (\(filteredTasks.filter(\.isCompleted).count))")
                             .hidigFont(size: 12, weight: .semibold)
@@ -171,7 +159,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(group.name.uppercased())
-                    .hidigFont(size: 10, weight: .bold, design: .rounded)
+                    .hidigFont(size: 10, weight: .bold)
                     .tracking(0.7)
                     .foregroundStyle(HidigPalette.secondary)
                 Spacer()
@@ -191,15 +179,18 @@ struct TodayView: View {
     }
 
     private func taskRow(_ task: TickTickTask) -> some View {
-        let isLocal = task.projectID == "hidigfocus.local"
+        let isLocal = store.state.localTasks.contains { $0.id == task.id }
+        let managedID = store.state.managedTasks.first { ($0.sourceID ?? $0.id.uuidString) == task.id }?.id
+        let canComplete = isLocal || managedID != nil
         return HStack(alignment: .top, spacing: 13) {
             Button {
                 if isLocal { store.toggleLocalTask(task.id) }
+                else if let managedID { store.setManagedTaskCompleted(managedID, completed: !task.isCompleted) }
             } label: {
-                HidigCheckmarkBox(isChecked: task.isCompleted, isEnabled: isLocal, size: 22)
+                HidigCheckmarkBox(isChecked: task.isCompleted, isEnabled: canComplete, size: 22)
             }
             .buttonStyle(.plain)
-            .disabled(!isLocal)
+            .disabled(!canComplete)
             .padding(.top, 1)
             Text(task.title)
                 .hidigFont(size: 14, weight: .medium)
@@ -223,7 +214,7 @@ struct TodayView: View {
 
     private var projectOptions: [(id: String, name: String)] {
         Dictionary(grouping: store.todayTasks, by: \.projectID)
-            .map { key, tasks in (id: key, name: tasks.first?.projectName ?? "TickTick") }
+            .map { key, tasks in (id: key, name: tasks.first?.projectName ?? "hidigFocus") }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -244,7 +235,7 @@ struct TodayView: View {
             .map { projectID, tasks in
                 TodayTaskProjectGroup(
                     id: projectID,
-                    name: tasks.first?.projectName ?? "TickTick",
+                    name: tasks.first?.projectName ?? "hidigFocus",
                     tasks: tasks.sorted(by: taskComesFirst)
                 )
             }
@@ -267,14 +258,14 @@ struct TodayView: View {
                     .hidigFont(size: 20)
                     .foregroundStyle(HidigPalette.forest)
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(store.connectionState.title)
+                    Text("На сегодня задач нет")
                         .hidigFont(size: 15, weight: .semibold)
                     Text(emptyTaskExplanation)
                         .hidigFont(size: 12)
                         .foregroundStyle(HidigPalette.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Открыть настройку TickTick") {
-                        store.selectedSection = .tickTick
+                    Button("Открыть задачи") {
+                        store.selectedSection = .tasks
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .padding(.top, 4)
@@ -324,12 +315,7 @@ struct TodayView: View {
     }
 
     private var emptyTaskExplanation: String {
-        switch store.connectionState {
-        case .cliMissing: return "Добавьте задачу прямо здесь. TickTick можно подключить позже как дополнительный источник."
-        case .signedOut: return "Добавьте задачу прямо здесь или войдите в TickTick для импорта задач."
-        case .failed(let message): return message
-        default: return "На сегодня задач нет. Добавьте локальную задачу или синхронизируйте внешний планировщик."
-        }
+        "Добавьте задачу в hidigFocus. Все задачи и отметки сохраняются на этом Mac."
     }
 
     private func addLocalTask() {

@@ -26,7 +26,7 @@ enum ReminderPlan {
     private var pending: Task<Void, Never>?
     private var latestTasks: [ManagedTask] = []
     // UNUserNotificationCenter requires a packaged application, never a SwiftPM test process.
-    private var center: UNUserNotificationCenter? { Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil }
+    private var center: UNUserNotificationCenter? { HidigRuntime.servicesAllowed && Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil }
     func requestPermission() async {
         guard let center else { return }
         do { authorized = try await center.requestAuthorization(options: [.alert, .sound, .badge]); if authorized { refresh(latestTasks) } }

@@ -12,7 +12,7 @@ enum TaskCardPlacement {
         else if left >= usable.minX { x = left }
         else { x = anchor.midX < bounds.midX ? right : left }
         return CGRect(x: min(max(x, usable.minX), usable.maxX - width),
-                      y: min(max(anchor.minY - 20, usable.minY), usable.maxY - height),
+                      y: min(max(anchor.minY - 90, usable.minY), usable.maxY - height),
                       width: width, height: height)
     }
 }
@@ -22,28 +22,37 @@ import SwiftUI
 
 /// The in-window editor needs an Escape handler even when a text field has not taken focus.
 struct TaskCardEscapeMonitor: NSViewRepresentable {
+    var shouldDismissOnPointer: () -> Bool = { true }
     let dismiss: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         context.coordinator.view = view
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak coordinator = context.coordinator] event in
-            guard let coordinator, let view = coordinator.view, event.window === view.window else { return event }
-            if event.type == .keyDown, event.keyCode == 53 { coordinator.dismiss?(); return nil }
-            if event.type == .leftMouseDown || event.type == .rightMouseDown {
-                let point = view.convert(event.locationInWindow, from: nil)
-                if !view.bounds.contains(point) { coordinator.dismiss?() }
-            }
-            return event
+            guard let coordinator else { return event }
+            return coordinator.handle(event)
         }
         return view
     }
-    func updateNSView(_ view: NSView, context: Context) { context.coordinator.dismiss = dismiss }
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.dismiss = dismiss
+        context.coordinator.shouldDismissOnPointer = shouldDismissOnPointer
+    }
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.detach() }
     final class Coordinator {
         weak var view: NSView?
         var dismiss: (() -> Void)?
+        var shouldDismissOnPointer: () -> Bool = { true }
         var monitor: Any?
+        func handle(_ event: NSEvent) -> NSEvent? {
+            guard let view, event.window === view.window else { return event }
+            if event.type == .keyDown, event.keyCode == 53 { dismiss?(); return nil }
+            if (event.type == .leftMouseDown || event.type == .rightMouseDown), shouldDismissOnPointer() {
+                let point = view.convert(event.locationInWindow, from: nil)
+                if !view.bounds.contains(point) { dismiss?() }
+            }
+            return event
+        }
         func detach() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
         deinit { detach() }
     }

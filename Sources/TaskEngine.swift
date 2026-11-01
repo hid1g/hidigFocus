@@ -76,6 +76,7 @@ enum TaskEngine {
             copy.seriesRootID = nil
             copy.occurrenceDate = nil
             copy.excludedOccurrences = nil
+            copy.seriesVersions = nil
             copy.sourceID = nil
             copy.sourceName = nil
             copy.sourceListID = nil
@@ -127,6 +128,7 @@ enum TaskEngine {
         merge(\.timeZoneID); merge(\.priority); merge(\.tags); merge(\.checklist)
         merge(\.repeatRule); merge(\.reminders); merge(\.attachments); merge(\.subtasks)
         merge(\.plannedEndDate); merge(\.excludedOccurrences)
+        merge(\.seriesVersions)
         updateTask(latest, in: &state)
     }
 
@@ -141,9 +143,9 @@ enum TaskEngine {
             at: 0
         )
         let original = state.managedTasks[index]
-        // Imported RRULEs stay under the source's control until edited locally.
+        // Supported imported rules run locally, just like rules created in hidigFocus.
         if completed, wasActive, original.nextOccurrenceID == nil,
-           let rule = original.repeatRule, rule.sourceRule == nil,
+           let rule = original.repeatRule.flatMap(RecurrenceProjection.supportedRule),
            let date = original.startDate ?? original.dueDate {
             var calendar = Calendar.current
             calendar.timeZone = TimeZone(identifier: original.timeZoneID) ?? .current
@@ -313,8 +315,10 @@ enum TaskEngine {
         records: [TickTickImportRecord],
         into state: inout PersistedAppState,
         now: Date = Date(),
-        completeSnapshot: Bool = false
+        completeSnapshot: Bool = false,
+        preserveExisting: Bool = false
     ) -> TaskImportReport {
+        let initialTaskCount = state.managedTasks.count
         var report = TaskImportReport(
             startedAt: now,
             foldersFound: folders.count,
@@ -328,12 +332,13 @@ enum TaskEngine {
         }
         for list in lists {
             if let index = state.taskLists.firstIndex(where: { $0.sourceID == list.sourceID && list.sourceID != nil }) {
+                guard !preserveExisting else { continue }
                 state.taskLists[index].name = list.name
                 state.taskLists[index].colorHex = list.colorHex
                 state.taskLists[index].sortOrder = list.sortOrder
             } else { state.taskLists.append(list) }
         }
-        if completeSnapshot {
+        if completeSnapshot && !preserveExisting {
             let present = Set(records.map(\.sourceID))
             for index in state.managedTasks.indices where state.managedTasks[index].sourceName == "TickTick" && state.managedTasks[index].status == .active {
                 if let id = state.managedTasks[index].sourceID { state.managedTasks[index].sourceUnavailable = !present.contains(id) }
@@ -351,6 +356,7 @@ enum TaskEngine {
         for record in records {
             let listID = listBySource[record.projectSourceID] ?? TaskList.inboxID
             if let index = taskBySource[record.sourceID] {
+                if preserveExisting { report.skipped += 1; continue }
                 let original = state.managedTasks[index]
                 // Preserve local edits while the corresponding source field is unchanged.
                 // On the first reconciliation the source repairs stale legacy imports.
@@ -431,7 +437,14 @@ enum TaskEngine {
             ))
             report.imported += 1
         }
-        restoreImportedHierarchy(in: &state)
+        if preserveExisting {
+            let addedIDs = Set(state.managedTasks.dropFirst(initialTaskCount).map(\.id))
+            let existing = state.managedTasks.filter { !addedIDs.contains($0.id) }
+            restoreImportedHierarchy(in: &state)
+            for (index, task) in existing.enumerated() { state.managedTasks[index] = task }
+        } else {
+            restoreImportedHierarchy(in: &state)
+        }
         report.finishedAt = now
         state.taskImportHistory.insert(report, at: 0)
         state.taskImportHistory = Array(state.taskImportHistory.prefix(100))

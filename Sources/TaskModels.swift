@@ -2,6 +2,7 @@ import Foundation
 
 enum TasksPresentation: String, CaseIterable, Identifiable {
     case list
+    case kanban
     case calendar
     case matrix
 
@@ -9,6 +10,7 @@ enum TasksPresentation: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .list: return "Список"
+        case .kanban: return "Канбан"
         case .calendar: return "Календарь"
         case .matrix: return "Матрица"
         }
@@ -16,8 +18,34 @@ enum TasksPresentation: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .list: return "list.bullet"
+        case .kanban: return "rectangle.3.group"
         case .calendar: return "calendar"
         case .matrix: return "square.grid.2x2"
+        }
+    }
+}
+
+enum TaskKanbanStage: String, Codable, CaseIterable, Identifiable {
+    case backlog
+    case planned
+    case inProgress
+    case done
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .backlog: return "Бэклог"
+        case .planned: return "Запланировано"
+        case .inProgress: return "В работе"
+        case .done: return "Готово"
+        }
+    }
+    var systemImage: String {
+        switch self {
+        case .backlog: return "tray"
+        case .planned: return "calendar"
+        case .inProgress: return "bolt"
+        case .done: return "checkmark.circle"
         }
     }
 }
@@ -54,6 +82,29 @@ enum CalendarZoom {
     static let bounds = 44.0...120.0
     static func clamp(_ value: Double) -> Double {
         min(bounds.upperBound, max(bounds.lowerBound, value))
+    }
+}
+
+enum CalendarDayCount {
+    static let bounds = 2...14
+
+    static func clamp(_ value: Int) -> Int {
+        min(bounds.upperBound, max(bounds.lowerBound, value))
+    }
+
+    static func title(_ value: Int) -> String {
+        let count = clamp(value)
+        let mod100 = count % 100
+        let suffix: String
+        if (11...14).contains(mod100) { suffix = "дней" }
+        else {
+            switch count % 10 {
+            case 1: suffix = "день"
+            case 2...4: suffix = "дня"
+            default: suffix = "дней"
+            }
+        }
+        return "\(count) \(suffix)"
     }
 }
 
@@ -244,6 +295,7 @@ struct ManagedTask: Identifiable, Codable, Equatable {
     var seriesRootID: UUID?
     var occurrenceDate: Date?
     var excludedOccurrences: [Date]?
+    var seriesVersions: [TaskSeriesVersion]?
     var sourceUnavailable: Bool?
     var durationMinutes: Int = 30
     var isAllDay = false
@@ -260,6 +312,7 @@ struct ManagedTask: Identifiable, Codable, Equatable {
     var comments: [TaskComment] = []
     var plannedPomodoros = 0
     var completedPomodoros = 0
+    var kanbanStage: TaskKanbanStage?
     var status: ManagedTaskStatus = .active
     var createdAt = Date()
     var modifiedAt = Date()
@@ -302,6 +355,13 @@ struct ManagedTask: Identifiable, Codable, Equatable {
     var calendarEndDate: Date? {
         guard let startDate else { return nil }
         return plannedEndDate ?? PlannerCalendar.current.date(byAdding: .minute, value: max(15, durationMinutes), to: startDate)
+    }
+
+    var effectiveKanbanStage: TaskKanbanStage {
+        if status == .completed || status == .wontDo { return .done }
+        // Reopening a card that was dropped into Done should make it actionable again.
+        if kanbanStage == .done { return .inProgress }
+        return kanbanStage ?? .backlog
     }
 }
 

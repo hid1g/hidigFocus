@@ -55,6 +55,22 @@ final class PlannerRegressionTests: XCTestCase {
         XCTAssertEqual(state.managedTasks[1].parentTaskID, state.managedTasks[0].id)
     }
 
+    func testPreviouslySkippedSeriesRootStillProjectsFutureDays() throws {
+        let calendar = PlannerCalendar.current
+        let day = calendar.startOfDay(for: Date())
+        let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: day))
+        var local = ManagedTask(title: "Прогулка", startDate: day, repeatRule: TaskRepeatRule(frequency: .daily))
+        local.status = .wontDo
+        let localTasks = RecurrenceProjection.tasks([local], from: day, to: try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: day)))
+        XCTAssertEqual(localTasks.first { $0.id == local.id }?.status, .wontDo)
+        XCTAssertEqual(localTasks.first { $0.startDate == tomorrow }?.status, .active)
+
+        var abandoned = local
+        abandoned.tickTickBaseline = TickTickImportRecord(sourceID: "old", projectSourceID: "p", title: "Прогулка", isAbandoned: true)
+        let sourceTasks = RecurrenceProjection.tasks([abandoned], from: day, to: try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: day)))
+        XCTAssertEqual(sourceTasks.count, 1)
+    }
+
     func testHierarchyUpgradeDoesNotReopenLocallyCompletedTasks() {
         var state = PersistedAppState()
         var remote = TickTickImportRecord(sourceID: "child", projectSourceID: "p", title: "Child", isCompleted: false)
@@ -140,6 +156,20 @@ final class PlannerRegressionTests: XCTestCase {
         XCTAssertNotEqual(result["long"]?.lane, result["first"]?.lane)
         XCTAssertEqual(result["first"]?.lane, result["second"]?.lane)
         XCTAssertEqual(result["later"]?.laneCount, 1)
+    }
+
+    func testShortTaskExpandsAcrossUnusedLanesInItsOwnTimeRange() {
+        let result = PlannerLayout.placements([
+            PlannerInterval(id: "long", start: 0, end: 120),
+            PlannerInterval(id: "early", start: 0, end: 30),
+            PlannerInterval(id: "third-lane", start: 0, end: 15),
+            PlannerInterval(id: "later", start: 30, end: 60)
+        ])
+        XCTAssertEqual(result["early"]?.laneCount, 3)
+        XCTAssertEqual(result["early"]?.span, 1)
+        XCTAssertEqual(result["later"]?.lane, 1)
+        XCTAssertEqual(result["later"]?.span, 2)
+        XCTAssertEqual(result["long"]?.span, 1)
     }
 
     func testQuarterHourTasksTouchingAtBoundaryKeepFullWidth() {

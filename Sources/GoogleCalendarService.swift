@@ -229,7 +229,7 @@ final class GoogleCalendarService: NSObject, ASWebAuthenticationPresentationCont
         guard var tokens = try tokenStore.load() else { throw GoogleCalendarError.notAuthorized }
         if tokens.expiresAt.timeIntervalSinceNow > 60 { return tokens.accessToken }
         guard let refreshToken = tokens.refreshToken,
-              let clientID = UserDefaults.standard.string(forKey: "googleOAuthClientID") else { throw GoogleCalendarError.tokenExpired }
+              let clientID = HidigRuntime.defaults.string(forKey: "googleOAuthClientID") else { throw GoogleCalendarError.tokenExpired }
         var values = ["refresh_token": refreshToken, "client_id": clientID, "grant_type": "refresh_token"]
         if let secret = tokenStore.loadClientSecret(), !secret.isEmpty { values["client_secret"] = secret }
         var refreshed = try await tokenRequest(values)

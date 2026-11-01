@@ -23,7 +23,7 @@ struct TaskPriorityBorder: ViewModifier {
         content.overlay {
             if priority != .none {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(priority.accent, lineWidth: priority == .high ? 1.8 : 1.3)
+                    .strokeBorder(priority.accent.opacity(0.55), lineWidth: 1)
                     .allowsHitTesting(false)
             }
         }
@@ -50,7 +50,12 @@ struct TaskCheckboxStyle: ToggleStyle {
 struct TaskSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
-    @State private var expanded = false
+    @State private var expanded: Bool
+    init(title: String, initiallyExpanded: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+        _expanded = State(initialValue: initiallyExpanded)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { expanded.toggle() } label: {

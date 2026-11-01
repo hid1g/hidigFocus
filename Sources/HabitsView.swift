@@ -3,28 +3,27 @@ import SwiftUI
 struct HabitsView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
-    @AppStorage("habitWeekOffset") private var weekOffset = 0
-    @State private var draggedHabitID: UUID?
+    @AppStorage("habitWeekOffset", store: HidigRuntime.defaults) private var weekOffset = 0
+    @Environment(\.hidigReduceMotion) private var reduceMotion
+    @State private var reorder = HabitReorderSession()
+    @State private var contentWidth: CGFloat = 1100
+    private var compactColumns: Bool { contentWidth < 850 }
+    private var dayColumnWidth: CGFloat { compactColumns ? 28 : 46 }
+    @State private var habitFrames: [UUID: CGRect] = [:]
     @State private var editorTarget: HabitEditorTarget?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 14) {
-                    PageTitle(
-                        eyebrow: "Ритм без наказания",
-                        title: "Привычки",
-                        subtitle: "Создавайте ежедневные, интервальные и гибкие цели. Серия учитывает только запланированный ритм."
-                    )
-                    weekNavigation
+                HStack(alignment: .top) {
+                    PageTitle(eyebrow: "", title: "Привычки",
+                        subtitle: "Ежедневные, интервальные и гибкие цели. Серия учитывает запланированный ритм.")
+                    Spacer()
+                    Button { editorTarget = HabitEditorTarget(habit: Habit(name: ""), isNew: true) } label: {
+                        Label("Новая привычка", systemImage: "plus")
+                    }.buttonStyle(PrimaryButtonStyle())
                 }
-
-                Button {
-                    editorTarget = HabitEditorTarget(habit: Habit(name: ""), isNew: true)
-                } label: {
-                    Label("Новая привычка", systemImage: "plus")
-                }
-                .buttonStyle(PrimaryButtonStyle())
+                weekNavigation
 
                 VStack(spacing: 0) {
                     habitHeader
@@ -37,19 +36,14 @@ struct HabitsView: View {
                             .padding(.vertical, 28)
                     } else {
                         ForEach(store.habits) { habit in
-                            habitRow(habit)
-                                .onDrag {
-                                    draggedHabitID = habit.id
-                                    return NSItemProvider(object: habit.id.uuidString as NSString)
-                                }
-                                .onDrop(
-                                    of: [.text],
-                                    delegate: HabitDropDelegate(
-                                        targetHabitID: habit.id,
-                                        draggedHabitID: $draggedHabitID,
-                                        store: store
-                                    )
-                                )
+                            HabitReorderRow(id: habit.id, session: reorder) {
+                                habitRow(habit)
+                            }
+                            .background(GeometryReader { geometry in
+                                Color.clear.preference(key: HabitRowFrames.self,
+                                    value: [habit.id: geometry.frame(in: .global)])
+                            })
+
                             if habit.id != store.habits.last?.id { Divider().overlay(HidigPalette.line.opacity(0.55)) }
                         }
                     }
@@ -57,13 +51,19 @@ struct HabitsView: View {
                 .padding(.horizontal, 20)
                 .foregroundStyle(HidigPalette.forest)
                 .background(HidigPalette.surface)
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(HidigPalette.line))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 36)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 30)
             .frame(maxWidth: 1100, alignment: .leading)
         }
+        .background(GeometryReader { geometry in Color.clear.preference(key: HabitContentWidthKey.self, value: geometry.size.width) })
+        .onPreferenceChange(HabitContentWidthKey.self) { contentWidth = $0 }
+        .onPreferenceChange(HabitRowFrames.self) { habitFrames = $0 }
+        .onExitCommand { reorder.cancel() }
+        .onDisappear { reorder.cancel() }
+        .onChange(of: store.habits.map(\.id)) { _ in reorder.cancel() }
         .overlay(alignment: .bottomTrailing) { Button("Отменить отметку") { store.undoHabitCheck() }.disabled(!store.canUndoHabit).padding(12) }
         .sheet(item: $editorTarget) { target in
             HabitEditorSheet(target: target, isPresented: Binding(
@@ -94,9 +94,9 @@ struct HabitsView: View {
                     Text(weekday(date))
                     Text(day(date)).foregroundStyle(HidigPalette.secondary)
                 }
-                .frame(width: 46)
+                .frame(width: dayColumnWidth)
             }
-            Text("Серия").frame(width: 62)
+            if !compactColumns { Text("Серия").frame(width: 62) }
             Color.clear.frame(width: 64)
         }
         .hidigFont(size: 10, weight: .semibold)
@@ -109,8 +109,24 @@ struct HabitsView: View {
             Image(systemName: "line.3.horizontal")
                 .hidigFont(size: 11, weight: .semibold)
                 .foregroundStyle(HidigPalette.secondary)
-                .frame(width: 18)
+                .frame(width: 26, height: 40)
+                .contentShape(Rectangle())
                 .help("Перетащите, чтобы изменить порядок")
+                .accessibilityLabel("Переместить привычку \(habit.name)")
+                .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                    .onChanged { value in
+                        reorder.update(id: habit.id, order: store.habits.map(\.id),
+                            frames: habitFrames, translation: value.translation.height)
+                    }
+                    .onEnded { _ in
+                        guard let move = reorder.finish() else { return }
+                        withAnimation(reduceMotion ? nil : .interactiveSpring(response: 0.28, dampingFraction: 0.86)) {
+                            store.moveHabit(move.source, relativeTo: move.target)
+                        }
+                    })
+                .accessibilityAction(named: "Переместить выше") { moveHabit(habit.id, by: -1) }
+                .accessibilityAction(named: "Переместить ниже") { moveHabit(habit.id, by: 1) }
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
                     Text(habit.name)
@@ -124,7 +140,7 @@ struct HabitsView: View {
                             .clipShape(Capsule())
                     }
                 }
-                Text(habit.schedule.summary)
+                Text(compactColumns ? habit.schedule.summary + " · серия: \(habit.currentStreak())" : habit.schedule.summary)
                     .hidigFont(size: 10, weight: .medium)
                     .foregroundStyle(HidigPalette.secondary)
             }
@@ -140,18 +156,20 @@ struct HabitsView: View {
                     action: { store.toggleHabit(habit.id, on: date) }
                 )
                 .help(editable ? "Отметку можно изменить за сегодня или вчера" : (scheduled ? "Эта дата недоступна для изменения" : "На этот день привычка не запланирована"))
-                .frame(width: 46)
+                .accessibilityLabel("\(habit.name), \(date.formatted(date: .complete, time: .omitted))")
+                .accessibilityValue(checked ? "Выполнено" : (scheduled ? "Не выполнено" : "Не запланировано"))
+                .frame(width: dayColumnWidth)
             }
-            VStack(spacing: 2) {
+            if !compactColumns { VStack(spacing: 2) {
                 Text("\(habit.currentStreak())")
-                    .hidigFont(size: 18, weight: .bold, design: .rounded)
+                    .hidigFont(size: 18, weight: .bold)
                 if !habit.streakUnit.isEmpty {
                     Text(habit.streakUnit)
                         .hidigFont(size: 9, weight: .semibold)
                         .foregroundStyle(HidigPalette.secondary)
                 }
             }
-            .frame(width: 62)
+            .frame(width: 62) }
             Button {
                 editorTarget = HabitEditorTarget(habit: habit, isNew: false)
             } label: { Image(systemName: "pencil") }
@@ -164,6 +182,14 @@ struct HabitsView: View {
                 .help("Удалить привычку")
         }
         .padding(.vertical, 14)
+    }
+
+    private func moveHabit(_ id: UUID, by step: Int) {
+        let habits = store.habits
+        guard let index = habits.firstIndex(where: { $0.id == id }), habits.indices.contains(index + step) else { return }
+        withAnimation(reduceMotion ? nil : .interactiveSpring(response: 0.28, dampingFraction: 0.86)) {
+            store.moveHabit(id, relativeTo: habits[index + step].id)
+        }
     }
 
     private var visibleDates: [Date] {
@@ -223,7 +249,7 @@ private struct HabitEditorSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(target.isNew ? "Новая привычка" : "Настройки привычки")
-                    .hidigFont(size: 25, weight: .bold, design: .rounded)
+                    .hidigFont(size: 25, weight: .bold)
                 Text("Настройте важность и реальный ритм выполнения.")
                     .hidigFont(size: 11)
                     .foregroundStyle(HidigPalette.secondary)
@@ -405,23 +431,33 @@ private struct HabitEditorSheet: View {
     }
 }
 
-private struct HabitDropDelegate: DropDelegate {
-    let targetHabitID: UUID
-    @Binding var draggedHabitID: UUID?
-    let store: AppStore
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedHabitID, draggedHabitID != targetHabitID else { return }
-        store.moveHabit(draggedHabitID, relativeTo: targetHabitID)
+private struct HabitRowFrames: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
     }
+}
 
-    func performDrop(info: DropInfo) -> Bool {
-        draggedHabitID = nil
-        return true
+/// Only this wrapper observes pointer updates; habit contents stay unchanged while dragging.
+private struct HabitReorderRow<Content: View>: View {
+    let id: UUID
+    @ObservedObject var session: HabitReorderSession
+    @Environment(\.hidigReduceMotion) private var reduceMotion
+    let content: Content
+
+    init(id: UUID, session: HabitReorderSession, @ViewBuilder content: () -> Content) {
+        self.id = id; self.session = session; self.content = content()
     }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+    var body: some View {
+        let lifted = session.drag?.source == id
+        content
+            .background(lifted ? HidigPalette.surfaceRaised : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(lifted ? 0.16 : 0), radius: 10, y: 4)
+            .offset(y: session.offset(for: id))
+            .zIndex(lifted ? 1 : 0)
+            .animation(reduceMotion || lifted ? nil : .interactiveSpring(response: 0.28, dampingFraction: 0.86),
+                       value: session.drag?.target)
     }
 }
 
@@ -460,4 +496,9 @@ private struct HabitDayCheckButton: View {
             }
         }
     }
+}
+
+private struct HabitContentWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 1100
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

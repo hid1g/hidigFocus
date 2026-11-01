@@ -3,12 +3,23 @@ import AppKit
 import SwiftUI
 
 struct FocusView: View {
+    @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
     @Environment(\.openWindow) private var openWindow
     var compact = false
-    @State private var selectedTask: UUID?
-    @State private var phase: PomodoroPhase = .work
-    @State private var stopwatch = false
+    @EnvironmentObject private var presentation: FocusPresentationState
+    private var selectedTask: UUID? {
+        get { presentation.selectedTask }
+        nonmutating set { presentation.selectedTask = newValue }
+    }
+    private var phase: PomodoroPhase {
+        get { presentation.phase }
+        nonmutating set { presentation.phase = newValue }
+    }
+    private var stopwatch: Bool {
+        get { presentation.stopwatch }
+        nonmutating set { presentation.stopwatch = newValue }
+    }
     @State private var selectingTask = false
     @State private var taskSearch = ""
     @State private var editingDurations = false
@@ -19,7 +30,7 @@ struct FocusView: View {
         HStack(spacing: 0) {
             VStack(spacing: compact ? 18 : 28) {
                 HStack {
-                    Text("Помодоро").hidigFont(size: compact ? 18 : 24, weight: .semibold)
+                    Text("Помодоро").hidigFont(size: compact ? 18 : 21, weight: .semibold)
                     Spacer()
                     Button { openWindow(id: "focus"); NSApplication.shared.activate(ignoringOtherApps: true) } label: { Image(systemName: "arrow.up.right.square") }
                         .buttonStyle(.plain).help("Открыть отдельное окно").accessibilityLabel("Отдельное окно помодоро")
@@ -45,7 +56,7 @@ struct FocusView: View {
                         Text(phaseTitle)
                         Image(systemName: "chevron.down").font(.system(size: 10))
                     }.padding(.horizontal, 16).padding(.vertical, 9)
-                        .background(HidigPalette.surfaceRaised).clipShape(Capsule())
+                        .background(HidigPalette.surfaceRaised).clipShape(RoundedRectangle(cornerRadius: 5))
                 }.menuStyle(.borderlessButton).fixedSize().disabled(store.activePomodoro != nil)
                     .accessibilityLabel("Интервал")
                 if !stopwatch && store.activePomodoro?.isStopwatch != true {
@@ -56,7 +67,7 @@ struct FocusView: View {
                     } label: {
                         Label("\(store.state.taskSettings.workMinutes) / \(store.state.taskSettings.shortBreakMinutes) мин", systemImage: "clock")
                             .hidigFont(size: 12).padding(.vertical, 9).padding(.horizontal, 10)
-                            .background(HidigPalette.surfaceRaised).clipShape(Capsule())
+                            .background(HidigPalette.surfaceRaised).clipShape(RoundedRectangle(cornerRadius: 5))
                     }.buttonStyle(.plain).disabled(store.activePomodoro != nil)
                         .accessibilityLabel("Время фокуса и отдыха")
                         .popover(isPresented: $editingDurations) { durationEditor }
@@ -70,17 +81,17 @@ struct FocusView: View {
                         }.buttonStyle(PrimaryButtonStyle())
                         Button("Завершить") { store.finishPomodoro() }.buttonStyle(SecondaryButtonStyle())
                         Button { store.finishPomodoro(completed: false) } label: { Image(systemName: "xmark") }
-                            .buttonStyle(HidigIconButtonStyle()).help("Отменить сессию")
+                            .buttonStyle(HidigIconButtonStyle()).help("Отменить сессию").accessibilityLabel("Отменить сессию")
                     } else {
                         Button("Начать") { store.startFocus(taskID: selectedTask, phase: phase, stopwatch: stopwatch) }
                             .buttonStyle(PrimaryButtonStyle()).frame(minWidth: 120)
                     }
                 }
                 if !compact { Spacer(minLength: 0) }
-            }.padding(compact ? 12 : 32).frame(maxWidth: compact ? .infinity : 420)
+            }.padding(compact ? 12 : 22).frame(maxWidth: compact ? .infinity : 420)
             if !compact {
                 Divider()
-                overview.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                overview.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }.foregroundStyle(HidigPalette.forest).background(HidigPalette.canvas)
     }
@@ -111,7 +122,7 @@ struct FocusView: View {
                     let rest = minutes <= 30 ? 5 : (minutes < 60 ? 10 : 15)
                     Button("\(minutes) / \(rest)") {
                         if store.setFocusDurations(workMinutes: minutes, breakMinutes: rest) { editingDurations = false }
-                    }.buttonStyle(SecondaryButtonStyle()).frame(maxWidth: .infinity)
+                    }.buttonStyle(SecondaryButtonStyle(expands: true))
                 }
             }
             Divider()
@@ -153,7 +164,7 @@ struct FocusView: View {
         let sessions = store.pomodoroSessions
         let today = sessions.filter { PlannerCalendar.current.isDateInToday($0.startedAt) }
         return VStack(alignment: .leading, spacing: 22) {
-            Text("Обзор").hidigFont(size: 23, weight: .semibold)
+            Text("Обзор").hidigFont(size: 21, weight: .semibold)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 metric("Помо сегодня", value: "\(today.filter { $0.phase == .work && $0.wasCompleted }.count)")
                 metric("Фокус сегодня", value: "\(today.filter { $0.phase == .work }.reduce(0) { $0 + $1.durationSeconds } / 60) мин")
@@ -185,8 +196,8 @@ struct FocusView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).hidigFont(size: 12).foregroundStyle(HidigPalette.secondary)
             Text(value).hidigFont(size: 25, weight: .semibold).monospacedDigit()
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(HidigPalette.surfaceRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
+            .overlay(alignment: .bottom) { Rectangle().fill(HidigPalette.line).frame(height: 1) }
     }
 }
 
@@ -202,15 +213,17 @@ private struct FocusClock: View {
             let countingUp = active?.isStopwatch ?? stopwatch
             let target = max(1, active?.targetSeconds ?? seconds)
             let display = countingUp ? elapsed : max(0, target - elapsed)
-            ZStack {
-                Circle().stroke(HidigPalette.line.opacity(0.5), lineWidth: 5)
-                if active != nil && !countingUp {
-                    Circle().trim(from: 0, to: min(1, CGFloat(elapsed) / CGFloat(target)))
-                        .stroke(HidigPalette.controlFill, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90))
-                }
+            VStack(spacing: 22) {
                 Text(String(format: "%02d:%02d", display / 60, display % 60))
-                    .hidigFont(size: compact ? 44 : 56, weight: .regular).monospacedDigit()
-            }.frame(width: compact ? 215 : 285, height: compact ? 215 : 285)
+                    .hidigFont(size: compact ? 48 : 76, weight: .light).monospacedDigit()
+                    .minimumScaleFactor(0.7).lineLimit(1)
+                if active != nil && !countingUp {
+                    ProgressView(value: min(1, Double(elapsed) / Double(target)))
+                        .tint(HidigPalette.controlFill).frame(maxWidth: compact ? 160 : 240)
+                        .accessibilityLabel("Прогресс интервала")
+                }
+            }.frame(maxWidth: .infinity).frame(height: compact ? 180 : 250)
+
         }
     }
 }

@@ -4,6 +4,7 @@ import SwiftUI
 struct JournalView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var journal: JournalState
     @State private var showsGuide = false
 
     var body: some View {
@@ -26,19 +27,25 @@ struct JournalView: View {
                 }
             }
 
-            HStack(spacing: 0) {
-                entriesList.frame(width: 230)
-                Divider().overlay(HidigPalette.line)
-                editor
+            Group {
+                if journal.journalEntries.isEmpty {
+                    HidigEmptyState(title: "Записей пока нет", detail: "Создайте первую запись в журнале.", actionTitle: "Новая запись") { store.createJournalEntry() }
+                } else {
+                    HStack(spacing: 0) {
+                        entriesList.frame(width: 190)
+                        Divider().overlay(HidigPalette.line)
+                        editor
+                    }
+                }
             }
             .foregroundStyle(HidigPalette.forest)
             .background(HidigPalette.surface)
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
             .frame(maxHeight: .infinity)
         }
-        .padding(.horizontal, 36)
-        .padding(.vertical, 36)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 30)
         .sheet(isPresented: $showsGuide) { ObsidianGuideSheet(isPresented: $showsGuide) }
     }
 
@@ -46,7 +53,7 @@ struct JournalView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 SectionEyebrow(text: "Записи").padding(.bottom, 8)
-                ForEach(store.journalEntries) { entry in
+                ForEach(journal.journalEntries) { entry in
                     Button { store.selectJournalEntry(entry) } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.title).hidigFont(size: 12, weight: .semibold).lineLimit(2)
@@ -58,7 +65,7 @@ struct JournalView: View {
                         .padding(10)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(SelectionRowButtonStyle(isSelected: store.selectedJournalEntry?.id == entry.id))
+                    .buttonStyle(SelectionRowButtonStyle(isSelected: journal.selectedJournalEntry?.id == entry.id))
                 }
             }
             .padding(16)
@@ -69,31 +76,34 @@ struct JournalView: View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
-                    TextField("Название файла", text: $store.journalTitleDraft)
+                    TextField("Название файла", text: $journal.journalTitleDraft)
                         .textFieldStyle(HidigTextFieldStyle())
                         .onSubmit { store.renameSelectedJournalEntry() }
-                        .disabled(store.selectedJournalEntry == nil)
+                        .disabled(journal.selectedJournalEntry == nil)
                     Button("Переименовать") { store.renameSelectedJournalEntry() }
                         .buttonStyle(SecondaryButtonStyle())
                         .fixedSize()
-                        .disabled(store.selectedJournalEntry == nil)
+                        .disabled(journal.selectedJournalEntry == nil)
                 }
-                if store.journalSaveState.isError { Button("Повторить сохранение") { store.retryJournalSave() } }
-                Text(store.journalSaveState.title)
+                if journal.journalSaveState.isError { Button("Повторить сохранение") { store.retryJournalSave() } }
+                Text(journal.journalSaveState.title)
                     .hidigFont(size: 9, weight: .medium)
-                    .foregroundStyle(store.journalSaveState.isError ? HidigPalette.warning : HidigPalette.secondary)
+                    .foregroundStyle(journal.journalSaveState.isError ? HidigPalette.warning : HidigPalette.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
 
             ZStack(alignment: .topLeading) {
                 LiveMarkdownEditor(text: Binding(
-                    get: { store.journalDraft },
-                    set: { store.updateJournalDraft($0) }
-                ))
-                .disabled(store.selectedJournalEntry == nil)
+                    get: { journal.journalDraft },
+                    set: { [entryID = journal.selectedJournalEntry?.id] value in
+                        guard journal.selectedJournalEntry?.id == entryID else { return }
+                        store.updateJournalDraft(value)
+                    }
+                ), documentID: journal.selectedJournalEntry?.id)
+                .disabled(journal.selectedJournalEntry == nil)
 
-                if store.selectedJournalEntry != nil && store.journalDraft.isEmpty {
+                if journal.selectedJournalEntry != nil && journal.journalDraft.isEmpty {
                     Text("Начните писать…")
                         .hidigFont(size: 14, design: .monospaced)
                         .foregroundStyle(HidigPalette.secondary.opacity(0.72))
@@ -106,15 +116,16 @@ struct JournalView: View {
     }
 }
 
-private struct LiveMarkdownEditor: NSViewRepresentable {
+struct LiveMarkdownEditor: NSViewRepresentable {
     @Binding var text: String
+    var documentID: String? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, documentID: documentID)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let textView = MarkdownTextView()
         textView.delegate = context.coordinator
         textView.isRichText = true
         textView.allowsUndo = true
@@ -136,201 +147,119 @@ private struct LiveMarkdownEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.documentView = textView
 
-        context.coordinator.textView = textView
-        context.coordinator.applyMarkdownStyles()
+        context.coordinator.install(on: textView)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
-        context.coordinator.binding = $text
-        if textView.string != text {
-            let selection = textView.selectedRange()
-            textView.string = text
-            textView.setSelectedRange(NSRange(location: min(selection.location, text.utf16.count), length: 0))
-        }
-        context.coordinator.applyMarkdownStyles()
+        context.coordinator.update(text: text, binding: $text, documentID: documentID)
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         var binding: Binding<String>
         weak var textView: NSTextView?
+        let highlighter = MarkdownHighlighter()
+        private var documentID: String?
         private var isApplyingStyles = false
+        private var isReplacingText = false
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, documentID: String? = nil) {
             binding = text
+            self.documentID = documentID
+            super.init()
+            NotificationCenter.default.addObserver(self, selector: #selector(undoDidFinish(_:)), name: .NSUndoManagerDidUndoChange, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(undoDidFinish(_:)), name: .NSUndoManagerDidRedoChange, object: nil)
+        }
+        deinit { NotificationCenter.default.removeObserver(self) }
+
+        @objc private func undoDidFinish(_ notification: Notification) {
+            guard let manager = notification.object as? UndoManager, manager === textView?.undoManager, let textView else { return }
+            if binding.wrappedValue != textView.string { binding.wrappedValue = textView.string }
+            applyMarkdownStyles(afterUndo: true)
+        }
+
+        func install(on textView: NSTextView) {
+            self.textView = textView
+            textView.delegate = self
+            textView.textStorage?.delegate = self
+            (textView as? MarkdownTextView)?.didEndMarkedText = { [weak self] in self?.applyMarkdownStyles() }
+            applyMarkdownStyles()
+        }
+
+        func update(text: String, binding: Binding<String>, documentID: String?) {
+            if self.documentID != documentID, let textView {
+                // End the old composition while callbacks are suppressed, before
+                // replacing its binding. Its marked contents cannot enter another file.
+                isReplacingText = true
+                textView.unmarkText()
+                textView.undoManager?.removeAllActions()
+                self.binding = binding
+                self.documentID = documentID
+                let selection = textView.selectedRange()
+                textView.string = text
+                highlighter.reset()
+                let location = min(selection.location, text.utf16.count)
+                textView.setSelectedRange(NSRange(location: location, length: min(selection.length, text.utf16.count - location)))
+                isReplacingText = false
+                applyMarkdownStyles()
+            } else {
+                self.binding = binding
+                replaceTextIfNeeded(text)
+            }
+        }
+
+        func detach() {
+            textView?.delegate = nil
+            textView?.textStorage?.delegate = nil
+            (textView as? MarkdownTextView)?.didEndMarkedText = nil
+            textView = nil
+        }
+
+        func replaceTextIfNeeded(_ text: String) {
+            guard let textView, textView.string != text, !textView.hasMarkedText() else { return }
+            let selection = textView.selectedRange()
+            isReplacingText = true
+            textView.string = text
+            isReplacingText = false
+            highlighter.reset()
+            let location = min(selection.location, text.utf16.count)
+            textView.setSelectedRange(NSRange(location: location, length: min(selection.length, text.utf16.count - location)))
+            applyMarkdownStyles()
+        }
+
+        func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
+            guard !isApplyingStyles, !isReplacingText else { return }
+            let undoing = textView?.undoManager.map { $0.isUndoing || $0.isRedoing } ?? false
+            guard editedMask.contains(.editedCharacters) || undoing else { return }
+            highlighter.edited(range: editedRange, changeInLength: delta, in: textStorage)
         }
 
         func textDidChange(_ notification: Notification) {
-            guard !isApplyingStyles, let textView else { return }
-            binding.wrappedValue = textView.string
+            guard !isApplyingStyles, !isReplacingText, let textView else { return }
+            if binding.wrappedValue != textView.string { binding.wrappedValue = textView.string }
             applyMarkdownStyles()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard !isApplyingStyles else { return }
+            // NSTextView adjusts selection while processing a character edit. Wait for
+            // textDidChange so attributes never run inside that edit/IME transaction.
+            guard !isApplyingStyles, !isReplacingText, !highlighter.hasPendingEdits else { return }
             applyMarkdownStyles()
         }
 
-        func applyMarkdownStyles() {
-            guard let textView, let storage = textView.textStorage else { return }
+        func applyMarkdownStyles(afterUndo: Bool = false) {
+            guard !isApplyingStyles, !isReplacingText, let textView else { return }
+            if !afterUndo, let manager = textView.undoManager, manager.isUndoing || manager.isRedoing { return }
             isApplyingStyles = true
             defer { isApplyingStyles = false }
-
-            let selection = textView.selectedRange()
-            let activeLineRange = lineRange(containing: selection, in: storage.string)
-            let fullRange = NSRange(location: 0, length: storage.length)
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineSpacing = 5
-            paragraph.paragraphSpacing = 4
-
-            storage.beginEditing()
-            storage.setAttributes([
-                .font: NSFont.systemFont(ofSize: 16),
-                .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraph
-            ], range: fullRange)
-
-            styleHeadings(in: storage, activeLineRange: activeLineRange)
-            styleLists(in: storage, activeLineRange: activeLineRange)
-            styleDelimited(pattern: #"(\*\*)([^\n]+?)(\*\*)"#, contentFont: .boldSystemFont(ofSize: 16), in: storage, activeLineRange: activeLineRange)
-            styleDelimited(pattern: #"(?<!\*)(\*)([^*\n]+?)(\*)(?!\*)"#, contentFont: NSFontManager.shared.convert(.systemFont(ofSize: 16), toHaveTrait: .italicFontMask), in: storage, activeLineRange: activeLineRange)
-            styleDelimited(pattern: #"(`)([^`\n]+?)(`)"#, contentFont: .monospacedSystemFont(ofSize: 15, weight: .regular), in: storage, activeLineRange: activeLineRange, background: NSColor.quaternaryLabelColor)
-            storage.endEditing()
-
-            textView.typingAttributes = [
-                .font: NSFont.systemFont(ofSize: 16),
-                .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraph
-            ]
-            textView.setSelectedRange(selection)
-        }
-
-        private func styleHeadings(in storage: NSTextStorage, activeLineRange: NSRange) {
-            let source = storage.string
-            let regex = try? NSRegularExpression(pattern: #"(?m)^(#{1,6})([ \t]+)(.*)$"#)
-            let matches = regex?.matches(in: source, range: NSRange(location: 0, length: storage.length)) ?? []
-            let sizes: [CGFloat] = [30, 25, 21, 19, 17, 16]
-
-            for match in matches {
-                let markerRange = NSUnionRange(match.range(at: 1), match.range(at: 2))
-                let level = min(match.range(at: 1).length, sizes.count)
-                storage.addAttribute(.font, value: NSFont.systemFont(ofSize: sizes[level - 1], weight: .bold), range: match.range)
-                styleDelimiter(markerRange, in: storage, activeLineRange: activeLineRange)
-            }
-        }
-
-        private func styleLists(in storage: NSTextStorage, activeLineRange: NSRange) {
-            let source = storage.string
-            let checkListRegex = try? NSRegularExpression(pattern: #"(?m)^(\s*)([-*+]\s+)(\[([ xX])\]\s+)(.*)$"#)
-            let checkListMatches = checkListRegex?.matches(
-                in: source,
-                range: NSRange(location: 0, length: storage.length)
-            ) ?? []
-            var checklistLineRanges = Set<NSRange>()
-
-            for match in checkListMatches {
-                let lineRange = (source as NSString).lineRange(for: match.range)
-                checklistLineRanges.insert(lineRange)
-                guard NSIntersectionRange(lineRange, activeLineRange).length == 0 else { continue }
-
-                let checkedMarker = (source as NSString).substring(with: match.range(at: 4))
-                let symbolName = checkedMarker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? "square"
-                    : "checkmark.square.fill"
-                applyListSymbol(
-                    symbolName,
-                    symbolRange: match.range(at: 2),
-                    hiddenRange: match.range(at: 3),
-                    in: storage
-                )
-                if symbolName == "checkmark.square.fill" {
-                    storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: match.range(at: 5))
-                    storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: match.range(at: 5))
-                }
-            }
-
-            let bulletRegex = try? NSRegularExpression(pattern: #"(?m)^(\s*)([-*+]\s+)(.*)$"#)
-            let bulletMatches = bulletRegex?.matches(
-                in: source,
-                range: NSRange(location: 0, length: storage.length)
-            ) ?? []
-            for match in bulletMatches {
-                let lineRange = (source as NSString).lineRange(for: match.range)
-                guard !checklistLineRanges.contains(lineRange),
-                      NSIntersectionRange(lineRange, activeLineRange).length == 0 else { continue }
-                applyListSymbol("circle.fill", symbolRange: match.range(at: 2), hiddenRange: nil, in: storage)
-            }
-        }
-
-        private func applyListSymbol(
-            _ symbolName: String,
-            symbolRange: NSRange,
-            hiddenRange: NSRange?,
-            in storage: NSTextStorage
-        ) {
-            guard symbolRange.length > 0,
-                  let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return }
-            let attachment = NSTextAttachment()
-            attachment.image = image
-            let side: CGFloat = symbolName == "circle.fill" ? 7 : 15
-            attachment.bounds = NSRect(x: 0, y: -2, width: side, height: side)
-            storage.addAttribute(.attachment, value: attachment, range: NSRange(location: symbolRange.location, length: 1))
-            if symbolRange.length > 1 {
-                storage.addAttributes([
-                    .foregroundColor: NSColor.clear,
-                    .font: NSFont.systemFont(ofSize: 1)
-                ], range: NSRange(location: symbolRange.location + 1, length: symbolRange.length - 1))
-            }
-            if let hiddenRange {
-                storage.addAttributes([
-                    .foregroundColor: NSColor.clear,
-                    .font: NSFont.systemFont(ofSize: 1)
-                ], range: hiddenRange)
-            }
-        }
-
-        private func styleDelimited(
-            pattern: String,
-            contentFont: NSFont,
-            in storage: NSTextStorage,
-            activeLineRange: NSRange,
-            background: NSColor? = nil
-        ) {
-            let regex = try? NSRegularExpression(pattern: pattern)
-            let matches = regex?.matches(in: storage.string, range: NSRange(location: 0, length: storage.length)) ?? []
-            for match in matches {
-                storage.addAttribute(.font, value: contentFont, range: match.range(at: 2))
-                if let background {
-                    storage.addAttribute(.backgroundColor, value: background, range: match.range(at: 2))
-                }
-                styleDelimiter(match.range(at: 1), in: storage, activeLineRange: activeLineRange)
-                styleDelimiter(match.range(at: 3), in: storage, activeLineRange: activeLineRange)
-            }
-        }
-
-        private func styleDelimiter(_ range: NSRange, in storage: NSTextStorage, activeLineRange: NSRange) {
-            if NSIntersectionRange(range, activeLineRange).length > 0 {
-                storage.addAttributes([
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                    .font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-                ], range: range)
-            } else {
-                storage.addAttributes([
-                    .foregroundColor: NSColor.clear,
-                    .font: NSFont.systemFont(ofSize: 1)
-                ], range: range)
-            }
-        }
-
-        private func lineRange(containing selection: NSRange, in source: String) -> NSRange {
-            let string = source as NSString
-            guard string.length > 0 else { return NSRange(location: 0, length: 0) }
-            let location = min(selection.location, string.length - 1)
-            let safeLength = min(selection.length, string.length - location)
-            return string.lineRange(for: NSRange(location: location, length: safeLength))
+            highlighter.highlight(textView)
         }
     }
+
 }
 
 private struct ObsidianGuideSheet: View {
@@ -342,7 +271,7 @@ private struct ObsidianGuideSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             SectionEyebrow(text: "Интеграция без синхронизации")
             Text("Как подключить к Obsidian")
-                .hidigFont(size: 26, weight: .bold, design: .rounded)
+                .hidigFont(size: 26, weight: .bold)
             Text("Obsidian умеет открывать папки с Markdown-файлами. Вы можете добавить папку журнала hidigFocus в существующее хранилище или открыть её как отдельное хранилище.")
                 .foregroundStyle(HidigPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)

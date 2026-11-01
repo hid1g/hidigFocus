@@ -10,21 +10,42 @@ enum HidigPalette {
     static var lettuce: Color { themed(\.accentSoft) }
     static var lettuceStrong: Color { themed(\.accent) }
     static var controlFill: Color { themed(\.accent) }
+    static var onAccent: Color { themed(\.onAccent) }
     static var forest: Color { themed(\.text) }
     static var forestMuted: Color { themed(\.secondary) }
     static var secondary: Color { themed(\.secondary) }
-    static var warning: Color { adaptive(light: 0x9A4E3A, dark: 0xE49A83) }
+    static var warning: Color { adaptive(light: 0xBC492F, dark: 0xEC9877) }
+    static var statusActive: Color { adaptive(light: 0x4B9A65, dark: 0x65BD84) }
+    static var statusInactive: Color { adaptive(light: 0xD35D47, dark: 0xF0806B) }
     static var hover: Color { themed(\.hover) }
     static var focusRing: Color { themed(\.accent) }
     static var disabledFill: Color { themed(\.disabled) }
 
-    private static func themed(_ keyPath: KeyPath<HidigThemeColors, String>) -> Color {
-        let preference = UserDefaults.standard.string(forKey: HidigSettingsKeys.sidebarColor)
-            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .ocean
-        return Color(nsColor: NSColor(name: NSColor.Name("\(preference.rawValue)-\(keyPath)")) { appearance in
-            let colors = preference.theme(isDark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            return NSColor(hex: colors[keyPath: keyPath])
+    // Dynamic colors remain adaptive, but their providers and parsed components are
+    // created once rather than on every card, hover, and layout pass.
+    private static let themedColors: [SidebarColorPreference: [KeyPath<HidigThemeColors, String>: Color]] = {
+        let paths: [KeyPath<HidigThemeColors, String>] = [
+            \.canvas, \.sidebar, \.surface, \.surfaceRaised, \.line, \.accentSoft,
+            \.accent, \.text, \.secondary, \.hover, \.disabled, \.onAccent
+        ]
+        return Dictionary(uniqueKeysWithValues: SidebarColorPreference.allCases.map { preference in
+            let light = preference.theme(isDark: false), dark = preference.theme(isDark: true)
+            let colors = Dictionary(uniqueKeysWithValues: paths.map { path in
+                let lightColor = NSColor(hex: light[keyPath: path])
+                let darkColor = NSColor(hex: dark[keyPath: path])
+                let color = NSColor(name: nil) { appearance in
+                    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? darkColor : lightColor
+                }
+                return (path, Color(nsColor: color))
+            })
+            return (preference, colors)
         })
+    }()
+
+    private static func themed(_ keyPath: KeyPath<HidigThemeColors, String>) -> Color {
+        let preference = HidigRuntime.defaults.string(forKey: HidigSettingsKeys.sidebarColor)
+            .flatMap(SidebarColorPreference.init(rawValue:)) ?? .ocean
+        return themedColors[preference]![keyPath]!
     }
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
@@ -48,9 +69,8 @@ struct SectionEyebrow: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let text: String
     var body: some View {
-        Text(text.uppercased())
-            .hidigFont(size: 11, weight: .bold, design: .rounded)
-            .tracking(1.25)
+        Text(text)
+            .hidigFont(size: 12, weight: .semibold)
             .foregroundStyle(HidigPalette.secondary)
     }
 }
@@ -61,13 +81,12 @@ struct PageTitle: View {
     let title: String
     let subtitle: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            SectionEyebrow(text: eyebrow)
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .hidigFont(size: 34, weight: .bold, design: .rounded)
+                .hidigFont(size: 21, weight: .semibold)
                 .foregroundStyle(HidigPalette.forest)
             Text(subtitle)
-                .hidigFont(size: 14)
+                .hidigFont(size: 12)
                 .foregroundStyle(HidigPalette.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -80,11 +99,11 @@ struct SoftPanel<Content: View>: View {
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
         content
-            .padding(20)
+            .padding(16)
             .foregroundStyle(HidigPalette.forest)
             .background(HidigPalette.surface)
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(HidigPalette.line.opacity(0.85)))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: PrintTokens.panelRadius).stroke(HidigPalette.line.opacity(0.85)))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.panelRadius))
     }
 }
 
@@ -92,6 +111,35 @@ struct HidigMenuOption: Identifiable, Equatable {
     let id: String
     let title: String
     var systemImage: String? = nil
+}
+
+/// A shared label for native menus; opening, selection and keyboard behavior stay native.
+struct HidigMenuButtonLabel: View {
+    let title: String
+    let systemImage: String
+    var isActive = false
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.hidigReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage).frame(width: 15).accessibilityHidden(true)
+            Text(title).lineLimit(1)
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
+        }
+        .hidigFont(size: 13, weight: .semibold)
+        .foregroundStyle(isActive ? HidigPalette.controlFill : HidigPalette.forest)
+        .padding(.horizontal, 12)
+        .frame(height: PrintTokens.buttonHeight)
+        .background(isHovered ? HidigPalette.hover : HidigPalette.surfaceRaised)
+        .overlay(RoundedRectangle(cornerRadius: PrintTokens.controlRadius).stroke(HidigPalette.line))
+        .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius))
+        .contentShape(Rectangle())
+        .opacity(isEnabled ? 1 : 0.58)
+        .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
+        .onHover { isHovered = $0 }
+    }
 }
 
 struct HidigMenuPicker: View {
@@ -120,12 +168,12 @@ struct HidigMenuPicker: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(HidigPalette.secondary)
             }
-            .hidigFont(size: compact ? 12 : 11, weight: compact ? .regular : .semibold)
+            .hidigFont(size: compact ? 12 : 13, weight: compact ? .regular : .semibold)
             .padding(.horizontal, compact ? 6 : 11)
-            .frame(minHeight: compact ? 28 : 34)
+            .frame(minHeight: compact ? 28 : PrintTokens.buttonHeight)
             .background(compact ? Color.clear : HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: PrintTokens.controlRadius).stroke(compact ? Color.clear : HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -178,12 +226,12 @@ struct HidigDateButton: View {
                 Text(date.formatted(.dateTime.day().month(.twoDigits).year()))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .hidigFont(size: 12, weight: .medium)
+            .hidigFont(size: compact ? 12 : 13, weight: compact ? .medium : .semibold)
             .padding(.horizontal, 10)
-            .frame(height: compact ? 28 : 34)
+            .frame(height: compact ? 28 : PrintTokens.buttonHeight)
             .background(compact ? HidigPalette.hover.opacity(0.45) : HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: PrintTokens.controlRadius).stroke(compact ? Color.clear : HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius))
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isPresented, arrowEdge: .top) {
@@ -201,27 +249,33 @@ struct HidigTimeButton: View {
     @Binding var date: Date
     var stepMinutes = 30
     var compact = false
+    var timeZoneID: String?
+    private var calendar: Calendar {
+        var value = PlannerCalendar.current
+        if let timeZoneID, let zone = TimeZone(identifier: timeZoneID) { value.timeZone = zone }
+        return value
+    }
     @State private var isPresented = false
 
     @State private var exactTime = ""
     @State private var invalidTime = false
     private var selectedMinute: Int {
-        PlannerCalendar.current.component(.hour, from: date) * 60 + PlannerCalendar.current.component(.minute, from: date)
+        calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
     }
 
     var body: some View {
         Button { isPresented.toggle() } label: {
             HStack(spacing: 7) {
                 Image(systemName: "clock")
-                Text(PlannerCalendar.time(date))
+                Text(PlannerCalendar.time(date, in: calendar.timeZone))
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .hidigFont(size: 12, weight: .medium)
+            .hidigFont(size: compact ? 12 : 13, weight: compact ? .medium : .semibold)
             .padding(.horizontal, 10)
-            .frame(height: compact ? 28 : 34)
+            .frame(height: compact ? 28 : PrintTokens.buttonHeight)
             .background(compact ? HidigPalette.hover.opacity(0.45) : HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(compact ? Color.clear : HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: PrintTokens.controlRadius).stroke(compact ? Color.clear : HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius))
         }
         .buttonStyle(.plain)
         .popover(isPresented: $isPresented, arrowEdge: .top) {
@@ -278,63 +332,69 @@ struct HidigTimeButton: View {
     }
 
     private func setMinute(_ minute: Int) {
-        date = PlannerCalendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date) ?? date
+        date = calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date) ?? date
     }
 
     private func timeLabel(_ minute: Int) -> String {
-        let value = PlannerCalendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
-        return PlannerCalendar.time(value)
+        let value = calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
+        return PlannerCalendar.time(value, in: calendar.timeZone)
     }
 }
 
 struct PrimaryButtonStyle: ButtonStyle {
+    var expands = false
     func makeBody(configuration: Configuration) -> some View {
         HidigButtonBody(
             label: configuration.label,
             isPressed: configuration.isPressed,
-            kind: .primary
+            kind: .primary, expands: expands
         )
     }
 }
 
 struct SecondaryButtonStyle: ButtonStyle {
+    var expands = false
     func makeBody(configuration: Configuration) -> some View {
         HidigButtonBody(
             label: configuration.label,
             isPressed: configuration.isPressed,
-            kind: .secondary
+            kind: .secondary, expands: expands
         )
     }
 }
 
 struct GhostButtonStyle: ButtonStyle {
+    var expands = false
     func makeBody(configuration: Configuration) -> some View {
         HidigButtonBody(
             label: configuration.label,
             isPressed: configuration.isPressed,
-            kind: .ghost
+            kind: .ghost, expands: expands
         )
     }
 }
 
 struct DestructiveButtonStyle: ButtonStyle {
+    var expands = false
     func makeBody(configuration: Configuration) -> some View {
         HidigButtonBody(
             label: configuration.label,
             isPressed: configuration.isPressed,
-            kind: .destructive
+            kind: .destructive, expands: expands
         )
     }
 }
 
 struct HidigIconButtonStyle: ButtonStyle {
     var isDestructive = false
+    var foreground: Color? = nil
+    var hoverFill: Color? = nil
 
     func makeBody(configuration: Configuration) -> some View {
         HidigIconButtonBody(
             label: configuration.label,
             isPressed: configuration.isPressed,
-            isDestructive: isDestructive
+            isDestructive: isDestructive, foreground: foreground, hoverFill: hoverFill
         )
     }
 }
@@ -348,10 +408,14 @@ struct SelectionRowButtonStyle: ButtonStyle {
             isPressed: configuration.isPressed,
             isSelected: isSelected
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityValue(isSelected ? "Выбрано" : "Не выбрано")
     }
 }
 
 private struct SelectionRowButtonBody<Label: View>: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @State private var isHovered = false
 
@@ -363,14 +427,14 @@ private struct SelectionRowButtonBody<Label: View>: View {
         label
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous)
                     .stroke(isSelected ? HidigPalette.focusRing : .clear, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous))
             .contentShape(Rectangle())
-            .scaleEffect(isPressed ? 0.992 : 1)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
-            .animation(.easeOut(duration: 0.12), value: isPressed)
+            .scaleEffect(isPressed && !reduceMotion ? 0.992 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isPressed)
             .onHover { isHovered = $0 }
     }
 
@@ -382,6 +446,7 @@ private struct SelectionRowButtonBody<Label: View>: View {
 }
 
 private struct HidigIconButtonBody<Label: View>: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
@@ -389,33 +454,35 @@ private struct HidigIconButtonBody<Label: View>: View {
     let label: Label
     let isPressed: Bool
     let isDestructive: Bool
+    let foreground: Color?
+    let hoverFill: Color?
 
     var body: some View {
         label
             .hidigFont(size: 13, weight: .semibold)
-            .foregroundStyle(isDestructive ? HidigPalette.warning : HidigPalette.forest)
-            .frame(width: 32, height: 32)
+            .foregroundStyle(isDestructive ? HidigPalette.warning : (foreground ?? HidigPalette.forest))
+            .frame(width: PrintTokens.buttonHeight, height: PrintTokens.buttonHeight)
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous)
                     .stroke(isHovered ? border : .clear)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous))
             .contentShape(Rectangle())
             .opacity(isEnabled ? 1 : 0.42)
-            .scaleEffect(isPressed ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
-            .animation(.easeOut(duration: 0.12), value: isPressed)
+            .scaleEffect(isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isPressed)
             .onHover { isHovered = $0 }
     }
 
     private var background: Color {
         guard isHovered || isPressed else { return .clear }
-        return isDestructive ? HidigPalette.warning.opacity(0.12) : HidigPalette.hover
+        return isDestructive ? HidigPalette.warning.opacity(0.12) : (hoverFill ?? HidigPalette.hover)
     }
 
     private var border: Color {
-        isDestructive ? HidigPalette.warning.opacity(0.45) : HidigPalette.line
+        isDestructive ? HidigPalette.warning.opacity(0.45) : (foreground?.opacity(0.2) ?? HidigPalette.line)
     }
 }
 
@@ -427,6 +494,7 @@ private enum HidigButtonKind {
 }
 
 private struct HidigButtonBody<Label: View>: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
@@ -434,24 +502,26 @@ private struct HidigButtonBody<Label: View>: View {
     let label: Label
     let isPressed: Bool
     let kind: HidigButtonKind
+    let expands: Bool
 
     var body: some View {
         label
             .hidigFont(size: 13, weight: .semibold)
+            .lineLimit(1)
             .foregroundStyle(foreground)
-            .padding(.horizontal, 15)
-            .frame(minHeight: 38)
+            .padding(.horizontal, 12)
+            .frame(minWidth: 64, maxWidth: expands ? .infinity : nil, minHeight: PrintTokens.buttonHeight)
             .background(background)
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous)
                     .stroke(border, lineWidth: kind == .ghost ? 0 : 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .scaleEffect(isPressed ? 0.985 : 1)
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous))
+            .scaleEffect(isPressed && !reduceMotion ? 0.985 : 1)
             .opacity(isEnabled ? 1 : 0.58)
-            .animation(.easeOut(duration: 0.12), value: isPressed)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
             .onHover { isHovered = $0 }
     }
 
@@ -459,7 +529,7 @@ private struct HidigButtonBody<Label: View>: View {
         if !isEnabled { return HidigPalette.secondary }
         switch kind {
         case .primary:
-            return .white
+            return HidigPalette.onAccent
         case .secondary, .ghost:
             return HidigPalette.forest
         case .destructive:
@@ -471,8 +541,7 @@ private struct HidigButtonBody<Label: View>: View {
         guard isEnabled else { return HidigPalette.disabledFill }
         switch kind {
         case .primary:
-            if isPressed { return HidigPalette.controlFill.opacity(0.78) }
-            return isHovered ? HidigPalette.controlFill.opacity(0.88) : HidigPalette.controlFill
+            return HidigPalette.controlFill
         case .secondary:
             if isPressed { return HidigPalette.lettuce.opacity(0.5) }
             return isHovered ? HidigPalette.hover : HidigPalette.surfaceRaised
@@ -498,6 +567,7 @@ private struct HidigButtonBody<Label: View>: View {
 }
 
 struct HidigCheckmarkBox: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
     let isChecked: Bool
     var isEnabled = true
@@ -507,7 +577,7 @@ struct HidigCheckmarkBox: View {
     var body: some View {
         Image(systemName: "checkmark")
             .hidigFont(size: size * 0.42, weight: .bold)
-            .foregroundStyle(Color.white)
+            .foregroundStyle(HidigPalette.onAccent)
             .opacity(isChecked ? 1 : 0)
             .frame(width: size, height: size)
             .background(background)
@@ -517,8 +587,8 @@ struct HidigCheckmarkBox: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: max(4, size * 0.25), style: .continuous))
             .opacity(isEnabled || isChecked ? 1 : 0.72)
-            .animation(.easeOut(duration: 0.12), value: isChecked)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isChecked)
+            .animation(reduceMotion ? nil : .easeOut(duration: PrintDesign.hover), value: isHovered)
     }
 
     private var background: Color {
@@ -557,9 +627,9 @@ struct HidigCheckboxRow: View {
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .background(isHovered && isEnabled ? HidigPalette.hover.opacity(0.72) : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -576,10 +646,10 @@ struct HidigTextFieldStyle: TextFieldStyle {
             .foregroundStyle(HidigPalette.forest)
             .tint(HidigPalette.lettuceStrong)
             .padding(.horizontal, 13)
-            .frame(height: 38)
+            .frame(height: PrintTokens.inputHeight)
             .background(HidigPalette.surfaceRaised)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(HidigPalette.line))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: PrintTokens.controlRadius).stroke(HidigPalette.line))
+            .clipShape(RoundedRectangle(cornerRadius: PrintTokens.controlRadius))
     }
 }
 
@@ -588,7 +658,8 @@ struct StatusDot: View {
     let isActive: Bool
     var body: some View {
         Circle()
-            .fill(isActive ? HidigPalette.lettuceStrong : HidigPalette.warning)
+            .fill(isActive ? HidigPalette.statusActive : HidigPalette.statusInactive)
             .frame(width: 8, height: 8)
+            .accessibilityHidden(true)
     }
 }

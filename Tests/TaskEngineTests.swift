@@ -131,13 +131,34 @@ final class TaskEngineTests: XCTestCase {
         XCTAssertEqual(restored.nextOccurrenceID, next.id)
     }
 
-    func testImportedRepeatRemainsSourceControlled() {
+    func testImportedRepeatCreatesOneLocalSuccessorWithoutSourceAccess() throws {
         var state = PersistedAppState()
-        let task = ManagedTask(title: "Импорт", startDate: Date(),
+        let task = ManagedTask(sourceID: "external", sourceName: "TickTick", title: "Импорт", startDate: Date(),
                                repeatRule: TaskRepeatRule(frequency: .daily, sourceRule: "RRULE:FREQ=DAILY"))
         state.managedTasks = [task]
         TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        XCTAssertEqual(state.managedTasks.count, 2)
+        let nextID = try XCTUnwrap(state.managedTasks[0].nextOccurrenceID)
+        let next = try XCTUnwrap(state.managedTasks.first { $0.id == nextID })
+        XCTAssertNil(next.sourceID)
+        XCTAssertNil(next.sourceName)
+        XCTAssertEqual(next.status, .active)
+        XCTAssertEqual(next.seriesRootID, task.id)
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
+        XCTAssertEqual(state.managedTasks.count, 2)
+        let day = try XCTUnwrap(next.startDate)
+        let end = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: 1, to: day))
+        XCTAssertEqual(RecurrenceProjection.tasks(state.managedTasks, from: day, to: end).count, 1)
+    }
+
+    func testUnsupportedImportedRuleDoesNotInventASuccessor() {
+        var state = PersistedAppState()
+        let task = ManagedTask(title: "Сложное правило", startDate: Date(),
+                               repeatRule: TaskRepeatRule(frequency: .daily, sourceRule: "RRULE:FREQ=DAILY;COUNT=5"))
+        state.managedTasks = [task]
+        TaskEngine.setCompleted(task.id, completed: true, in: &state)
         XCTAssertEqual(state.managedTasks.count, 1)
+        XCTAssertEqual(state.managedTasks[0].status, .completed)
     }
 
     func testCalendarMoveSnapsAbsoluteTimeAndMovesAcrossDays() throws {

@@ -3,14 +3,14 @@ import Foundation
 enum PlannerCalendar {
     static var current: Calendar {
         var calendar = Calendar.current
-        let weekday = UserDefaults.standard.integer(forKey: "planner.firstWeekday")
+        let weekday = HidigRuntime.defaults.integer(forKey: "planner.firstWeekday")
         if (1...7).contains(weekday) { calendar.firstWeekday = weekday }
-        if let value = UserDefaults.standard.string(forKey: "planner.timeZone"), let zone = TimeZone(identifier: value) { calendar.timeZone = zone }
+        if let value = HidigRuntime.defaults.string(forKey: "planner.timeZone"), let zone = TimeZone(identifier: value) { calendar.timeZone = zone }
         return calendar
     }
-    static func time(_ date: Date) -> String {
-        let zone = current.timeZone
-        let use24Hours = UserDefaults.standard.object(forKey: "planner.use24Hours") as? Bool != false
+    static func time(_ date: Date) -> String { time(date, in: current.timeZone) }
+    static func time(_ date: Date, in zone: TimeZone) -> String {
+        let use24Hours = HidigRuntime.defaults.object(forKey: "planner.use24Hours") as? Bool != false
         let key = "hidigFocus.time.\(zone.identifier).\(use24Hours)"
         // Each thread owns its formatter; preferences form the cache key.
         let storage = Thread.current.threadDictionary

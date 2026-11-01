@@ -20,11 +20,16 @@ enum HidigFontPreference: String, CaseIterable, Identifiable {
     case monospaced
     case avenir
     case georgia
+    case golos, onest, manrope, inter
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .golos: return "Golos Text"
+        case .onest: return "Onest"
+        case .manrope: return "Manrope"
+        case .inter: return "Inter"
         case .system: return "Системный"
         case .rounded: return "Округлый"
         case .serif: return "Классический"
@@ -36,6 +41,9 @@ enum HidigFontPreference: String, CaseIterable, Identifiable {
 
     func font(size: CGFloat, weight: Font.Weight, design: Font.Design?) -> Font {
         switch self {
+        case .golos, .onest, .manrope, .inter:
+            guard let name = HidigFontRegistry.name(for: self) else { return .system(size: size, weight: weight) }
+            return .custom(name, fixedSize: size).weight(weight)
         case .system:
             return .system(size: size, weight: weight, design: design ?? .default)
         case .rounded:
@@ -137,13 +145,18 @@ enum SidebarColorPreference: String, CaseIterable, Identifiable {
     case blue
     case amber
     case midnight
+    case paper, ink, mist, moss
 
-    static let allCases: [SidebarColorPreference] = [.ocean, .blue, .sage, .graphite, .cream, .lavender, .rose, .amber, .midnight]
+    static let allCases: [SidebarColorPreference] = [.paper, .ink, .mist, .moss, .ocean, .blue, .sage, .graphite, .cream, .lavender, .rose, .amber, .midnight]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .paper: return "Бумага"
+        case .ink: return "Чернила"
+        case .mist: return "Туман"
+        case .moss: return "Мох"
         case .sage: return "Лес"
         case .cream: return "Solarized"
         case .graphite: return "Графит"
@@ -165,7 +178,40 @@ enum SidebarColorPreference: String, CaseIterable, Identifiable {
     }
 
     func theme(isDark: Bool) -> HidigThemeColors {
+        if [.paper, .ink, .mist, .moss].contains(self) {
+            let accent: String
+            switch self {
+            case .mist: accent = isDark ? "#A7C1CF" : "#52778C"
+            case .moss: accent = isDark ? "#B0C99D" : "#526B40"
+            case .ink: accent = isDark ? "#D5E6F1" : "#314E63"
+            default: accent = isDark ? "#EC9877" : "#BC492F"
+            }
+            func role(_ name: String, _ light: String, _ dark: String) -> String { PrintTokens.color(name, dark: isDark, fallback: isDark ? dark : light) }
+            return HidigThemeColors(canvas: role("canvas", "#F7F3EA", "#1C2B36"), sidebar: role("sidebar", "#17384D", "#17384D"),
+                surface: role("surface", "#FFFDF7", "#253844"), surfaceRaised: role("surfaceRaised", "#EEE8DC", "#2E4452"),
+                line: role("line", "#DCD8CD", "#435663"), accentSoft: role("selection", "#F4E1D5", "#533F37"),
+                accent: self == .paper ? role("accent", "#BC492F", "#EC9877") : accent,
+                text: role("text", "#203747", "#EEE9DF"), secondary: role("secondary", "#67716F", "#B6C0C1"),
+                hover: isDark ? "#344B58" : "#EEE8DC", disabled: role("surfaceRaised", "#EEE8DC", "#2E4452"))
+        }
+        let original = originalTheme(isDark: isDark)
+        return HidigThemeColors(
+            canvas: isDark ? "#242421" : "#FBFAF7",
+            sidebar: self == .amber ? (isDark ? "#20201D" : "#EEECE6") : original.sidebar,
+            surface: isDark ? "#2B2B27" : "#FFFEFA",
+            surfaceRaised: isDark ? "#32322C" : "#F0EEE8",
+            line: isDark ? "#42423B" : "#DCD8CF",
+            accentSoft: self == .amber ? (isDark ? "#3E3B31" : "#E3DDD1") : original.accentSoft,
+            accent: self == .amber ? (isDark ? "#DCAB88" : "#965639") : original.accent,
+            text: isDark ? "#ECE9DF" : "#302E29",
+            secondary: isDark ? "#B7B3A7" : "#6B655B",
+            hover: isDark ? "#37362F" : "#EAE6DD",
+            disabled: isDark ? "#302F29" : "#EEEBE4")
+    }
+
+    private func originalTheme(isDark: Bool) -> HidigThemeColors {
         switch self {
+        case .paper, .ink, .mist, .moss: return theme(isDark: isDark)
         case .blue:
             return isDark
                 ? HidigThemeColors(canvas: "#202733", sidebar: "#19212E", surface: "#293345", surfaceRaised: "#323E53", line: "#465675", accentSoft: "#294A79", accent: "#7DAEFF", text: "#EDF3FF", secondary: "#ACBAD0", hover: "#34435C", disabled: "#2C3544")
@@ -218,6 +264,21 @@ struct HidigThemeColors {
     let secondary: String
     let hover: String
     let disabled: String
+
+    var onAccent: String { contrastRatio(with: "#FFFFFF") >= contrastRatio(with: "#000000") ? "#FFFFFF" : "#000000" }
+
+    func contrastRatio(with foreground: String) -> Double {
+        func luminance(_ hex: String) -> Double {
+            let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+            let channels = [16, 8, 0].map { shift -> Double in
+                let c = Double((value >> shift) & 255) / 255
+                return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+            }
+            return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+        }
+        let a = luminance(accent), b = luminance(foreground)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
 }
 
 enum AppIconPreference: String, CaseIterable, Identifiable {
@@ -229,13 +290,16 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
     case blue
     case amber
     case rose
+    case doors, medallion
 
-    static let allCases: [AppIconPreference] = [.green, .light, .dark, .rose, .purple, .aurora, .blue, .amber]
+    static let allCases: [AppIconPreference] = [.doors, .medallion, .green, .light, .dark, .rose, .purple, .aurora, .blue, .amber]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .doors: return "Двери"
+        case .medallion: return "Медальон"
         case .light: return "Светлая"
         case .green: return "Оригинал"
         case .dark: return "Графит"
@@ -249,6 +313,8 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
 
     var ornament: AppIconOrnament {
         switch self {
+        case .doors: return .doors
+        case .medallion: return .medallion
         case .green: return .plain
         case .light: return .ring
         case .dark: return .frame
@@ -262,6 +328,7 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
 
     var colors: [Color] {
         switch self {
+        case .doors, .medallion: return [Color(hex: "#17384D"), Color(hex: "#17384D")]
         case .light: return [Color(hex: "#F7F9FC"), Color(hex: "#DCE5F0")]
         case .green: return [Color(hex: "#5E81AC"), Color(hex: "#88C0D0")]
         case .dark: return [Color(hex: "#202630"), Color(hex: "#3B4352")]
@@ -286,14 +353,19 @@ enum AppIconPreference: String, CaseIterable, Identifiable {
 }
 
 enum AppIconOrnament: String, Hashable {
-    case plain, ring, frame, halo, rays, grid, sun, moon
+    case plain, ring, frame, halo, rays, grid, sun, moon, doors, medallion
 }
 
 struct AppIconPreview: View {
     let style: AppIconPreference
     var size: CGFloat = 48
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if let image = PrintIconImages.image(style) {
+            Image(nsImage: image).resizable().interpolation(.high).scaledToFit().frame(width: size, height: size)
+        } else { legacyBody }
+    }
+    @ViewBuilder private var legacyBody: some View {
         let tileSize = size * 0.82
         ZStack {
             ZStack {
@@ -358,6 +430,7 @@ private struct AppIconOrnamentView: View {
 
     @ViewBuilder var body: some View {
         switch style.ornament {
+        case .doors, .medallion: EmptyView()
         case .plain:
             Circle().fill(Color.black.opacity(0.10)).frame(width: size * 0.68, height: size * 0.68)
         case .ring:
@@ -421,7 +494,7 @@ enum AppAppearanceController {
 enum AppIconController {
     private static var appliedStyle: AppIconPreference?
     static let originalIcon: NSImage = {
-        if let url = Bundle.module.url(forResource: "hidigFocus-icon-master", withExtension: "png"),
+        if let url = HidigResources.bundle.url(forResource: "hidigFocus-icon-master", withExtension: "png"),
            let image = NSImage(contentsOf: url) {
             return image
         }
@@ -454,12 +527,12 @@ enum AppIconController {
         if let image = renderer.nsImage {
             NSApplication.shared.applicationIconImage = image
             appliedStyle = style
-            UserDefaults.standard.set(style.rawValue, forKey: HidigSettingsKeys.appIcon)
-            UserDefaults.standard.synchronize()
-            DistributedNotificationCenter.default().postNotificationName(
+            HidigRuntime.defaults.set(style.rawValue, forKey: HidigSettingsKeys.appIcon)
+            HidigRuntime.defaults.synchronize()
+            if !HidigRuntime.isIsolated { DistributedNotificationCenter.default().postNotificationName(
                 NSNotification.Name("com.hidig.focus.iconChanged"), object: nil,
                 userInfo: nil, deliverImmediately: true
-            )
+            ) }
             let imageView = NSImageView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
             imageView.image = image
             imageView.imageScaling = .scaleProportionallyUpOrDown
@@ -490,6 +563,7 @@ enum LaunchAtLoginController {
     }
 
     static func setEnabled(_ enabled: Bool) throws {
+        guard HidigRuntime.servicesAllowed else { return }
         if enabled {
             if SMAppService.mainApp.status != .enabled {
                 try SMAppService.mainApp.register()
@@ -553,7 +627,7 @@ enum SidebarColorResolver {
     }
 
     static func currentColors() -> (tint: NSColor, accent: NSColor) {
-        let defaults = UserDefaults.standard
+        let defaults = HidigRuntime.defaults
         let preference = defaults.string(forKey: HidigSettingsKeys.sidebarColor)
             .flatMap(SidebarColorPreference.init(rawValue:))
         let customHex = defaults.string(forKey: HidigSettingsKeys.customSidebarColor) ?? "#E5EFDA"
@@ -564,7 +638,7 @@ enum SidebarColorResolver {
     }
 
     static func currentTheme(for appearance: NSAppearance) -> HidigThemeColors {
-        let preference = UserDefaults.standard.string(forKey: HidigSettingsKeys.sidebarColor)
+        let preference = HidigRuntime.defaults.string(forKey: HidigSettingsKeys.sidebarColor)
             .flatMap(SidebarColorPreference.init(rawValue:)) ?? .ocean
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return preference.theme(isDark: isDark)
@@ -582,4 +656,14 @@ extension NSColor {
             alpha: 1
         )
     }
+}
+
+private enum PrintIconImages {
+    static let images: [AppIconPreference: NSImage] = {
+        Dictionary(uniqueKeysWithValues: [AppIconPreference.doors, .medallion].compactMap { style in
+            guard let url = HidigResources.bundle.url(forResource: style.rawValue, withExtension: "png", subdirectory: "PrintIcons"), let image = NSImage(contentsOf: url) else { return nil }
+            return (style, image)
+        })
+    }()
+    static func image(_ style: AppIconPreference) -> NSImage? { images[style] }
 }

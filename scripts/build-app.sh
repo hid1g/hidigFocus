@@ -5,7 +5,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 CONFIGURATION="${HIDIGFOCUS_BUILD_CONFIGURATION:-release}"
 SIGNING_IDENTITY="${HIDIGFOCUS_SIGNING_IDENTITY:--}"
-BUILD_DIR="$PROJECT_DIR/.build-app"
+BUILD_DIR="${HIDIGFOCUS_BUILD_DIR:-$PROJECT_DIR/.build-app}"
 
 swift build --disable-sandbox --scratch-path "$BUILD_DIR" -j 2 -c "$CONFIGURATION" --product hidigFocus
 BIN_DIR="$(swift build --disable-sandbox --scratch-path "$BUILD_DIR" -c "$CONFIGURATION" --show-bin-path)"
@@ -53,13 +53,13 @@ xcrun clang -fobjc-arc -bundle -framework Cocoa -mmacosx-version-min=13.0 \
     -o "$PLUGIN_DIR/Contents/MacOS/HidigDockTilePlugin"
 ICON_TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$ICON_TEMP_DIR"' EXIT
-for ICON_STYLE in green light dark rose purple aurora blue amber; do
+for ICON_STYLE in doors medallion green light dark rose purple aurora blue amber; do
     ICONSET_DIR="$ICON_TEMP_DIR/$ICON_STYLE.iconset"
     "$BIN_DIR/hidigFocus" --export-icon "$ICON_STYLE" "$ICONSET_DIR"
     cp "$ICONSET_DIR/icon_512x512@2x.png" "$PLUGIN_DIR/Contents/Resources/$ICON_STYLE.png"
 done
 # The fallback is stable; user preferences must not alter release contents.
-iconutil -c icns "$ICON_TEMP_DIR/green.iconset" -o "$APP_DIR/Contents/Resources/hidigFocus.icns"
+iconutil -c icns "$ICON_TEMP_DIR/doors.iconset" -o "$APP_DIR/Contents/Resources/hidigFocus.icns"
 codesign --force --sign "$SIGNING_IDENTITY" "$PLUGIN_DIR"
 codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR"
 cp -R "$PROJECT_DIR/BrowserExtension" "$EXTENSION_DIR"

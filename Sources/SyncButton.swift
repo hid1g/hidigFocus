@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct SyncButton: View {
+    @Environment(\.hidigReduceMotion) private var reduceMotion
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
+    @EnvironmentObject private var integration: IntegrationState
     @EnvironmentObject private var store: AppStore
     var showTitle = true
 
@@ -9,32 +11,34 @@ struct SyncButton: View {
 
     var body: some View {
         Button {
-            Task { await store.refreshConnectionAndTasks() }
+            Task { await store.checkTickTickImportConnection() }
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .rotationEffect(.degrees(rotation))
+                    .rotationEffect(.degrees(reduceMotion ? 0 : rotation))
                 if showTitle {
-                    Text(store.isSynchronizing ? "Обновляем" : "Обновить")
+                    Text(integration.isSynchronizing ? "Проверяем" : "Проверить доступ для импорта")
                 }
             }
         }
         .buttonStyle(showTitle ? AnyButtonStyle(SecondaryButtonStyle()) : AnyButtonStyle(HidigIconButtonStyle()))
-        .disabled(store.isSynchronizing)
+        .disabled(integration.isSynchronizing)
         .help(syncHelp)
-        .onAppear { updateRotation(store.isSynchronizing) }
-        .onChange(of: store.isSynchronizing) { updateRotation($0) }
+        .onAppear { updateRotation(integration.isSynchronizing) }
+        .onChange(of: integration.isSynchronizing) { updateRotation($0) }
+        .onChange(of: reduceMotion) { _ in updateRotation(integration.isSynchronizing) }
     }
 
     private var syncHelp: String {
-        if store.isSynchronizing { return "Идёт синхронизация TickTick" }
-        if let date = store.state.lastSuccessfulSync {
-            return "Последняя синхронизация: \(date.formatted(date: .omitted, time: .shortened))"
-        }
-        return "Синхронизировать TickTick"
+        integration.isSynchronizing ? "Проверяем доступ к импорту" : "Проверить доступ к TickTick для импорта"
     }
 
     private func updateRotation(_ isSynchronizing: Bool) {
+        if reduceMotion {
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { rotation = 0 }
+            return
+        }
         if isSynchronizing {
             rotation = 0
             withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {

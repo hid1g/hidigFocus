@@ -5,39 +5,10 @@ struct TaskDetailExtras: View {
     @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var reminderService: TaskReminderService
     @Binding var task: ManagedTask
-    @State private var checklistTitle = ""
-    @State private var subtaskTitle = ""
     @State private var reminderDate = Date().addingTimeInterval(3600)
     @State private var busyAttachment = false
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            TaskSection(title: "Чек-лист") {
-                ForEach($task.checklist) { $item in
-                    HStack {
-                        Toggle("", isOn: $item.isCompleted).labelsHidden().toggleStyle(TaskCheckboxStyle())
-                        TextField("Пункт", text: $item.title).textFieldStyle(HidigTextFieldStyle())
-                        Button { task.checklist.removeAll { $0.id == item.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("Удалить пункт")
-                    }
-                }
-                HStack {
-                    TextField("Новый пункт", text: $checklistTitle).textFieldStyle(HidigTextFieldStyle()).onSubmit(addChecklist)
-                    Button(action: addChecklist) { Image(systemName: "plus") }.buttonStyle(HidigIconButtonStyle())
-                }
-            }
-            TaskSection(title: "Подзадачи") {
-                let children = store.state.managedTasks.filter { $0.parentTaskID == task.id && $0.status != .trashed }
-                ForEach(children) { child in
-                    HStack {
-                        Toggle(child.title, isOn: Binding(get: { child.status == .completed }, set: { store.setManagedTaskCompleted(child.id, completed: $0) })).toggleStyle(TaskCheckboxStyle())
-                        Spacer()
-                        Button("Открыть") { store.selectedTaskID = child.id }.buttonStyle(.borderless)
-                    }
-                }
-                HStack {
-                    TextField("Новая подзадача", text: $subtaskTitle).textFieldStyle(HidigTextFieldStyle()).onSubmit(addSubtask)
-                    Button(action: addSubtask) { Image(systemName: "plus") }.buttonStyle(HidigIconButtonStyle())
-                }
-            }
             TaskSection(title: "Вложения") {
                 ForEach(task.attachments) { attachment in
                     HStack {
@@ -47,6 +18,7 @@ struct TaskDetailExtras: View {
                         }.buttonStyle(.borderless)
                         Spacer()
                         Button { task.attachments.removeAll { $0.id == attachment.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("Убрать вложение из задачи")
+                            .accessibilityLabel("Убрать вложение: \(attachment.name)")
                     }
                 }
                 Button(busyAttachment ? "Копируется…" : "Добавить файл…", action: importAttachment).buttonStyle(GhostButtonStyle()).disabled(busyAttachment)
@@ -57,6 +29,7 @@ struct TaskDetailExtras: View {
                         Text(reminder.date?.formatted(date: .abbreviated, time: .shortened) ?? reminder.relativeMinutes.map { "За \($0) мин. до начала" } ?? reminder.sourceValue ?? "Неизвестное правило")
                         Spacer()
                         Button { task.reminders.removeAll { $0.id == reminder.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain)
+                            .accessibilityLabel("Удалить напоминание")
                     }
                 }
                 HStack {
@@ -83,25 +56,31 @@ struct TaskDetailExtras: View {
                 }
                 Text("Перенос в календаре меняет плановый интервал и сохраняет этот срок.").foregroundStyle(.secondary)
             }
+            TaskSection(title: "История изменений") {
+                let changes = store.task(id: task.id)?.changeHistory ?? task.changeHistory
+                if changes.isEmpty {
+                    Text("Изменений пока нет").foregroundStyle(HidigPalette.secondary)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(changes) { change in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(change.summary).fixedSize(horizontal: false, vertical: true)
+                                Text(change.date, format: .dateTime.day().month().year().hour().minute())
+                                    .hidigFont(size: 11).foregroundStyle(HidigPalette.secondary)
+                            }.accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+            }
             if task.sourceUnavailable == true { Label("Задача недоступна в источнике. Локальная копия сохранена.", systemImage: "exclamationmark.triangle").foregroundStyle(.secondary) }
         }.hidigFont(size: 12).foregroundStyle(HidigPalette.forest)
     }
     private var deadlineBinding: Binding<Date> { Binding(get: { task.dueDate ?? Date() }, set: { task.dueDate = $0 }) }
-    private func addChecklist() {
-        let title = checklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        task.checklist.append(TaskChecklistItem(title: title, sortOrder: Int64(task.checklist.count))); checklistTitle = ""
-    }
-    private func addSubtask() {
-        let title = subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        store.addSubtask(to: task.id, title: title); subtaskTitle = ""
-    }
     private func importAttachment() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let source = panel.url else { return }
         busyAttachment = true
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("hidigFocus/Attachments", isDirectory: true)
+        let root = store.attachmentDirectoryURL
         Task {
             do {
                 let attachment = try await Task.detached(priority: .utility) {
@@ -115,5 +94,33 @@ struct TaskDetailExtras: View {
             } catch { store.errorMessage = "Не удалось добавить файл: \(error.localizedDescription)" }
             busyAttachment = false
         }
+    }
+}
+
+struct TaskChecklistSection: View {
+    @Binding var task: ManagedTask
+    @State private var checklistTitle = ""
+    var body: some View {
+        TaskSection(title: "Чек-лист", initiallyExpanded: true) {
+            ForEach($task.checklist) { $item in
+                HStack {
+                    Toggle("", isOn: $item.isCompleted).labelsHidden().toggleStyle(TaskCheckboxStyle())
+                        .accessibilityLabel("Пункт чек-листа: \(item.title)")
+                    TextField("Пункт", text: $item.title).textFieldStyle(HidigTextFieldStyle())
+                    Button { task.checklist.removeAll { $0.id == item.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("Удалить пункт")
+                        .accessibilityLabel("Удалить пункт: \(item.title)")
+                }
+            }
+            HStack {
+                TextField("Новый пункт", text: $checklistTitle).textFieldStyle(HidigTextFieldStyle()).onSubmit(addChecklist)
+                Button(action: addChecklist) { Image(systemName: "plus") }.buttonStyle(HidigIconButtonStyle())
+                    .accessibilityLabel("Добавить пункт чек-листа")
+            }
+        }
+    }
+    private func addChecklist() {
+        let title = checklistTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        task.checklist.append(TaskChecklistItem(title: title, sortOrder: Int64(task.checklist.count))); checklistTitle = ""
     }
 }

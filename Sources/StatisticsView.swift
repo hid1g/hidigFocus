@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StatisticsView: View {
     @Environment(\.hidigPaletteIdentity) private var paletteIdentity
-    @State private var period = 7
+    @AppStorage("statistics.period", store: HidigRuntime.defaults) private var period = 7
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
@@ -65,8 +65,8 @@ struct StatisticsView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 36)
+            .padding(.horizontal, 22)
+            .padding(.top, 30)
             .padding(.bottom, 50)
             .frame(maxWidth: 1100, alignment: .leading)
         }
@@ -85,17 +85,15 @@ struct StatisticsView: View {
     private func metric(value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(value)
-                .hidigFont(size: 28, weight: .bold, design: .rounded)
+                .hidigFont(size: 32, weight: .medium)
                 .foregroundStyle(HidigPalette.forest)
             Text(label)
                 .hidigFont(size: 10, weight: .semibold)
                 .foregroundStyle(HidigPalette.secondary)
         }
-        .padding(18)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(HidigPalette.surface)
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(HidigPalette.line))
-        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .overlay(alignment: .bottom) { Rectangle().fill(HidigPalette.line).frame(height: 1) }
     }
 
     private var checkedHabitsToday: Int {

@@ -4,15 +4,21 @@ import Foundation
 
 @MainActor
 final class AppStore: NSObject, ObservableObject {
+    let journal = JournalState()
+    let focusPresentation = FocusPresentationState()
+    let saving = SaveState()
+    let integration = IntegrationState()
+
     @Published var selectedSection: AppSection = .groups
     @Published private(set) var state: PersistedAppState
-    @Published private(set) var connectionState: TickTickConnectionState = .checking
-    @Published private(set) var journalEntries: [JournalEntry] = []
-    @Published private(set) var selectedJournalEntry: JournalEntry?
-    @Published private(set) var journalDraft = ""
-    @Published var journalTitleDraft = ""
+    private(set) var connectionState: TickTickConnectionState { get { integration.connectionState } set { integration.connectionState = newValue } }
+    private(set) var journalEntries: [JournalEntry] { get { journal.journalEntries } set { journal.journalEntries = newValue } }
+    private(set) var selectedJournalEntry: JournalEntry? { get { journal.selectedJournalEntry } set { journal.selectedJournalEntry = newValue } }
+    private(set) var journalDraft: String { get { journal.journalDraft } set { journal.journalDraft = newValue } }
+    var journalTitleDraft: String { get { journal.journalTitleDraft } set { journal.journalTitleDraft = newValue } }
     @Published var selectedGroupID: UUID?
     @Published var selectedTaskID: UUID?
+    @Published var pendingTaskDeletion: Set<UUID> = []
     @Published var pendingProtectedResourceChange: ProtectedResourceChange?
     @Published var taskSidebarSelection: TaskSidebarSelection = .today
     let planner: PlannerWorkspace
@@ -20,7 +26,7 @@ final class AppStore: NSObject, ObservableObject {
     var tasksPresentation: TasksPresentation { get { planner.presentation } set { planner.presentation = newValue } }
     var taskCalendarMode: TaskCalendarMode { get { planner.mode } set { planner.mode = newValue } }
     var taskCalendarAnchor: Date { get { planner.anchor } set { planner.anchor = newValue } }
-    @Published private(set) var taskSaveState: JournalSaveState = .idle
+    private(set) var taskSaveState: JournalSaveState { get { saving.taskSaveState } set { saving.taskSaveState = newValue } }
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     private var undoEntries: [TaskHistoryEntry] = []
@@ -31,10 +37,22 @@ final class AppStore: NSObject, ObservableObject {
     private var saveRevision: UInt64 = 0
     private var writer: SaveCoordinator!
     private var persistenceFailedToLoad = false
+    private var taskDataRevision: UInt64 = 0
+    private let projectionCache = PlannerProjectionCache()
+    var taskProjectionPreparationCount: Int { projectionCache.preparationCount }
+    private var cachedCalendarContext: Calendar?
+    private var calendarEventRevision: UInt64 = 0
+    private var daySnapshotCache: [(PlannerDaySnapshotKey, PlannerDaySnapshot)] = []
+    private var eventDayCache: [(Date, Calendar, PlannerFilter, String, UInt64, [GoogleCalendarEventSnapshot])] = []
     private var indexedTasks: [ManagedTask] = []
     private var taskPositions: [UUID: Int] = [:]
     private var listPositions: [UUID: Int] = [:]
     private var countCache: [TaskSidebarSelection: Int] = [:]
+    private var visibleTasksCache: [TaskSidebarSelection: [ManagedTask]] = [:]
+    private var visibleTasksCalendar: Calendar?
+    private var countCalendar: Calendar?
+    private var visibleTasksCacheDay: Date?
+    private var visibleTasksCacheCompleted: Bool?
     private var countCacheDay: Date?
     private var countCacheCompleted = false
     private var calendarIndex = PlannerCalendarIndex()
@@ -46,23 +64,26 @@ final class AppStore: NSObject, ObservableObject {
     private var indexRequestedAnchor: Date?
     private var projectionGeneration: UInt64 = 0
     private var virtualTasks: [UUID: ManagedTask] = [:]
+    private let journalWriteReceipt = HidigWriteReceipt()
     private let journalWriter = DispatchQueue(label: "hidigFocus.journal", qos: .utility)
     private var lastReminderDay = Calendar.current.startOfDay(for: Date())
     private var pendingJournalSave: Task<Void, Never>?
     private var pendingJournalValue: (String, JournalEntry, Int)?
     private var journalRevision = 0
     @Published var errorMessage: String?
-    @Published private(set) var isSynchronizing = false
-    @Published private(set) var browserExtensionLastContact: Date?
-    @Published private(set) var safariExtensionLastContact: Date?
-    @Published private(set) var journalSaveState: JournalSaveState = .idle
-    @Published private(set) var googleCalendars: [GoogleCalendarDescriptor] = []
-    @Published private(set) var googleCalendarEvents: [GoogleCalendarEventSnapshot] = []
-    @Published private(set) var isGoogleSynchronizing = false
-    @Published private(set) var tickTickImportPreview: TaskImportPreview?
-    @Published private(set) var isImportingTickTick = false
+    private(set) var isSynchronizing: Bool { get { integration.isSynchronizing } set { integration.isSynchronizing = newValue } }
+    private(set) var browserExtensionLastContact: Date? { get { integration.browserExtensionLastContact } set { integration.browserExtensionLastContact = newValue } }
+    private(set) var safariExtensionLastContact: Date? { get { integration.safariExtensionLastContact } set { integration.safariExtensionLastContact = newValue } }
+    private(set) var journalSaveState: JournalSaveState { get { journal.journalSaveState } set { journal.journalSaveState = newValue } }
+    private(set) var googleCalendars: [GoogleCalendarDescriptor] { get { integration.googleCalendars } set { integration.googleCalendars = newValue } }
+    @Published private(set) var googleCalendarEvents: [GoogleCalendarEventSnapshot] = [] { didSet { calendarEventRevision &+= 1; eventDayCache.removeAll(keepingCapacity: true) } }
+    private(set) var isGoogleSynchronizing: Bool { get { integration.isGoogleSynchronizing } set { integration.isGoogleSynchronizing = newValue } }
+    private(set) var tickTickImportPreview: TaskImportPreview? { get { integration.tickTickImportPreview } set { integration.tickTickImportPreview = newValue } }
+    private(set) var isImportingTickTick: Bool { get { integration.isImportingTickTick } set { integration.isImportingTickTick = newValue } }
 
-    private let servicesEnabled: Bool
+    private let requestedServicesEnabled: Bool
+    private var servicesEnabled: Bool { requestedServicesEnabled && !persistenceFailedToLoad }
+    var dataIsReadOnly: Bool { persistenceFailedToLoad }
     private let repository: AppStateRepository
     private let journalRepository: JournalRepository
     private let tickTickService = TickTickCLIService()
@@ -76,11 +97,11 @@ final class AppStore: NSObject, ObservableObject {
     private var pendingTickTickImport: TickTickCLIService.ImportSnapshot?
 
     override convenience init() {
-        self.init(repository: AppStateRepository(), startServices: ProcessInfo.processInfo.environment["HIDIGFOCUS_QA"] != "1")
+        self.init(repository: AppStateRepository(), startServices: HidigRuntime.servicesAllowed)
     }
-    init(repository: AppStateRepository, startServices: Bool = true, plannerDefaults: UserDefaults = .standard) {
+    init(repository: AppStateRepository, startServices: Bool = true, plannerDefaults: UserDefaults = HidigRuntime.defaults) {
         self.planner = PlannerWorkspace(defaults: plannerDefaults)
-        self.servicesEnabled = startServices
+        self.requestedServicesEnabled = startServices && HidigRuntime.servicesAllowed
         self.repository = repository
         self.journalRepository = JournalRepository(applicationSupportDirectory: repository.applicationSupportDirectory)
         var loadError: String?
@@ -91,17 +112,18 @@ final class AppStore: NSObject, ObservableObject {
             loadError = "Не удалось загрузить настройки: \(error.localizedDescription)"
         }
         super.init()
-        if startServices {
+        if servicesEnabled {
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.checkFocusCompletion() }
             }
             focusTimer = timer; RunLoop.main.add(timer, forMode: .common)
         }
-        if ProcessInfo.processInfo.environment["HIDIGFOCUS_QA"] == "1", state.managedTasks.isEmpty,
-           let count = ProcessInfo.processInfo.environment["HIDIGFOCUS_QA_TASKS"].flatMap(Int.init) {
-            state = PlannerFixtures.make(count: count)
+        if HidigRuntime.environment["HIDIGFOCUS_QA"] == "1", state.managedTasks.isEmpty,
+           let count = HidigRuntime.environment["HIDIGFOCUS_QA_TASKS"].flatMap(Int.init) {
+            let seriesCount = HidigRuntime.environment["HIDIGFOCUS_QA_SERIES"].flatMap(Int.init)
+            state = PlannerFixtures.make(count: count, seriesCount: seriesCount)
         }
-        if ProcessInfo.processInfo.environment["HIDIGFOCUS_QA"] == "1" {
+        if HidigRuntime.environment["HIDIGFOCUS_QA"] == "1" {
             selectedSection = .tasks; planner.presentation = .calendar; planner.mode = .fourDays; planner.anchor = Date()
         }
         writer = SaveCoordinator(repository: repository)
@@ -109,15 +131,14 @@ final class AppStore: NSObject, ObservableObject {
         indexedTasks = state.managedTasks
         rebuildTaskPositions()
         calendarIndex.replaceTasks(indexedTasks)
-        reminderService.refresh(state.managedTasks)
+        if !persistenceFailedToLoad { reminderService.refresh(state.managedTasks) }
         errorMessage = loadError
         NotificationCenter.default.addObserver(self, selector: #selector(flushBeforeTermination), name: NSApplication.willTerminateNotification, object: nil)
         selectedGroupID = state.groups.first?.id
         rollDisciplineForward()
         loadJournalEntries(selectNewest: true)
-        if startServices {
-            startRulesServer(); beginApplicationMonitoring(); updateBlockingRules(); scheduleSynchronization()
-            Task { await refreshConnectionAndTasks() }
+        if servicesEnabled {
+            startRulesServer(); beginApplicationMonitoring(); updateBlockingRules(); scheduleLocalMaintenance()
         }
     }
 
@@ -130,11 +151,29 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     var todayTasks: [TickTickTask] {
-        let today = DayKey.make(from: Date())
-        let local = state.localTasks.filter { $0.dayKey == today }.map(\.asTask)
-        let tickTick = lastSyncIsToday ? state.cachedTasks : []
-        return local + tickTick
+        let calendar = PlannerCalendar.current
+        let first = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: 1, to: first) ?? first.addingTimeInterval(86400)
+        let lists = Dictionary(uniqueKeysWithValues: state.taskLists.map { ($0.id, $0) })
+        let tasks = RecurrenceProjection.tasks(state.managedTasks, from: first, to: end)
+            .filter { $0.status != .trashed && $0.status != .wontDo }
+        let managed = tasks.map { task in
+            TickTickTask(id: task.sourceID ?? task.id.uuidString,
+                         projectID: task.listID.uuidString,
+                         projectName: lists[task.listID]?.name ?? "hidigFocus",
+                         title: task.title, dueDate: task.startDate ?? task.dueDate,
+                         completedAt: task.completedAt, status: task.status == .completed ? 2 : 0)
+        }
+        let local = state.localTasks.filter { $0.dayKey == DayKey.make(from: first) }.map(\.asTask)
+        // Retain legacy group selections without requiring a live account. Managed
+        // tasks always win over the old import cache, including locally rescheduled ones.
+        let importedIDs = Set(state.managedTasks.compactMap(\.sourceID))
+        let legacy = state.cachedTasks.filter {
+            !importedIDs.contains($0.id) && $0.dueDate.map { calendar.isDate($0, inSameDayAs: first) } == true
+        }
+        return local + managed + legacy
     }
+
     var groups: [BlockGroup] { state.groups.map { state.pendingGroupRules?[$0.id] ?? $0 } }
     /// Access indicators use the applied rule; the editor may contain an unapplied draft.
     func appliedGroup(_ id: UUID) -> BlockGroup? { state.groups.first { $0.id == id } }
@@ -164,12 +203,73 @@ final class AppStore: NSObject, ObservableObject {
         tasks(for: taskSidebarSelection)
     }
 
+    /// The board needs the complete saved task set when it groups cards by project
+    /// or shows archive/trash independently from the current sidebar selection.
+    var kanbanManagedTasks: [ManagedTask] { state.managedTasks.map(TaskSeriesEditing.displayedRoot) }
+
+    private func projectionKey(search: String, kind: String, collapsed: Set<UUID> = [], now: Date) -> PlannerProjectionKey {
+        let calendar = PlannerCalendar.current
+        return PlannerProjectionKey(revision: taskDataRevision, selection: taskSidebarSelection,
+            filter: planner.filter, sort: planner.sort, search: search, calendar: calendar,
+            day: calendar.startOfDay(for: now), kind: kind, collapsed: collapsed)
+    }
+
+    func plannerKanbanSnapshot(search: String, scope: String, allProjects: Bool, now: Date = Date()) -> PlannerTaskSnapshot {
+        let key = projectionKey(search: search, kind: "kanban.\(scope).\(allProjects)", now: now)
+        return projectionCache.value(for: key, now: now) {
+            let source = !allProjects && scope == "active" ? visibleManagedTasks : kanbanManagedTasks
+            let tasks = planner.filter.sorted(source.filter { task in
+                let belongs = scope == "trash" ? task.status == .trashed : (scope == "archive" ? task.status == .completed || task.status == .wontDo : task.status == .active)
+                return belongs && plannerMatches(task, search: search, includeTrash: scope == "trash", includeCompleted: scope == "archive")
+            }, by: planner.sort)
+            var snapshot = PlannerTaskSnapshot(tasks: tasks)
+            for task in tasks {
+                snapshot.byProject[task.listID, default: []].append(task)
+                snapshot.byStage[task.effectiveKanbanStage, default: []].append(task)
+                snapshot.byStatus[task.status, default: []].append(task)
+            }
+            return snapshot
+        }
+    }
+
+    func plannerListSnapshot(search: String, collapsed: Set<UUID>, now: Date = Date()) -> PlannerTaskSnapshot {
+        let key = projectionKey(search: search, kind: "list", collapsed: collapsed, now: now)
+        return projectionCache.value(for: key, now: now) {
+            var matching = visibleManagedTasks.filter {
+                plannerMatches($0, search: search, includeTrash: taskSidebarSelection == .trash, includeCompleted: taskSidebarSelection == .completed)
+            }
+            var included = Set(matching.map(\.id))
+            for child in matching {
+                var parentID = child.parentTaskID
+                while let id = parentID, let parent = task(id: id), parent.status == .wontDo, included.insert(id).inserted {
+                    matching.append(parent); parentID = parent.parentTaskID
+                }
+            }
+            let ordered = planner.filter.sorted(matching, by: planner.sort)
+            let rows = PlannerTaskTree.rows(ordered, collapsed: collapsed)
+            let groups = planner.sort == .date ? Dictionary(grouping: rows) { row -> String in
+                let task = row.root
+                guard let date = task.dueDate ?? task.startDate else { return "Без срока" }
+                if task.status == .active && task.dueDate != nil && (task.isAllDay ? date < key.day : date < now) { return "Просрочено" }
+                return key.calendar.isDate(date, inSameDayAs: now) ? "Сегодня" : "Предстоящие"
+            } : ["Задачи": rows]
+            return PlannerTaskSnapshot(tasks: ordered, rows: rows, groupedRows: groups)
+        }
+    }
+
     private func tasks(for selection: TaskSidebarSelection) -> [ManagedTask] {
         let calendar = PlannerCalendar.current
         let start = calendar.startOfDay(for: Date())
+        if visibleTasksCalendar != calendar || visibleTasksCacheDay != start || visibleTasksCacheCompleted != planner.filter.showCompleted {
+            visibleTasksCache.removeAll(keepingCapacity: true)
+            visibleTasksCalendar = calendar
+            visibleTasksCacheDay = start
+            visibleTasksCacheCompleted = planner.filter.showCompleted
+        }
+        if let cached = visibleTasksCache[selection] { return cached }
         let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
-        let filtered = state.managedTasks.filter { task in
-            let allowed = task.status == .active || (planner.filter.showCompleted && task.status == .completed)
+        let filtered = state.managedTasks.map(TaskSeriesEditing.displayedRoot).filter { task in
+            let allowed = task.status == .active || (planner.filter.showCompleted && (task.status == .completed || task.status == .wontDo))
             switch selection {
             case .all: return allowed
             case .tomorrow: return allowed && (task.startDate ?? task.dueDate).map { calendar.isDateInTomorrow($0) } == true
@@ -183,15 +283,16 @@ final class AppStore: NSObject, ObservableObject {
             case .list(let id):
                 return allowed && task.listID == id
             case .completed:
-                return task.status == .completed
+                return task.status == .completed || task.status == .wontDo
             case .trash:
                 return task.status == .trashed
             }
         }
+        let result: [ManagedTask]
         if selection == .completed {
-            return filtered.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
-        }
-        return filtered.sorted {
+            result = filtered.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+        } else {
+        result = filtered.sorted {
             switch ($0.startDate, $1.startDate) {
             case let (left?, right?) where left != right: return left < right
             case (nil, _?): return false
@@ -199,19 +300,23 @@ final class AppStore: NSObject, ObservableObject {
             default: return $0.sortOrder < $1.sortOrder
             }
         }
+        }
+        visibleTasksCache[selection] = result
+        return result
     }
 
     var unscheduledManagedTasks: [ManagedTask] {
-        state.managedTasks.filter { $0.status == .active && $0.startDate == nil }
+        state.managedTasks.map(TaskSeriesEditing.displayedRoot).filter { $0.status == .active && $0.startDate == nil }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     var activeTaskCount: Int { state.managedTasks.filter { $0.status == .active }.count }
 
     func visibleCount(selection: TaskSidebarSelection) -> Int {
-        let day = PlannerCalendar.current.startOfDay(for: Date())
-        if day != countCacheDay || countCacheCompleted != planner.filter.showCompleted {
-            countCache.removeAll(); countCacheDay = day; countCacheCompleted = planner.filter.showCompleted
+        let calendar = PlannerCalendar.current
+        let day = calendar.startOfDay(for: Date())
+        if countCalendar != calendar || day != countCacheDay || countCacheCompleted != planner.filter.showCompleted {
+            countCache.removeAll(); countCalendar = calendar; countCacheDay = day; countCacheCompleted = planner.filter.showCompleted
         }
         if countCache.isEmpty { rebuildCounts(day: day) }
         return countCache[selection] ?? 0
@@ -220,10 +325,10 @@ final class AppStore: NSObject, ObservableObject {
         let calendar = PlannerCalendar.current
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: day) ?? day
         let weekEnd = calendar.date(byAdding: .day, value: 7, to: day) ?? day
-        for task in state.managedTasks {
-            if task.status == .completed { countCache[.completed, default: 0] += 1 }
+        for task in state.managedTasks.map(TaskSeriesEditing.displayedRoot) {
+            if task.status == .completed || task.status == .wontDo { countCache[.completed, default: 0] += 1 }
             if task.status == .trashed { countCache[.trash, default: 0] += 1 }
-            guard task.status == .active || (countCacheCompleted && task.status == .completed) else { continue }
+            guard task.status == .active || (countCacheCompleted && (task.status == .completed || task.status == .wontDo)) else { continue }
             countCache[.all, default: 0] += 1
             countCache[.list(task.listID), default: 0] += 1
             if task.listID == TaskList.inboxID { countCache[.inbox, default: 0] += 1 }
@@ -236,7 +341,18 @@ final class AppStore: NSObject, ObservableObject {
         }
     }
 
+    private func ensureCalendarContext(_ calendar: Calendar) {
+        guard cachedCalendarContext != calendar else { return }
+        cachedCalendarContext = calendar
+        calendarIndex = PlannerCalendarIndex(); calendarIndex.replaceTasks(indexedTasks)
+        calendarFallbackDays.removeAll(keepingCapacity: true)
+        virtualTasks.removeAll(keepingCapacity: true)
+        projectionGeneration = 0; indexRequestedAnchor = nil
+        indexBuild?.cancel(); indexBuild = nil; indexRequest &+= 1
+    }
+
     func calendarTasks(on day: Date) -> [ManagedTask] {
+        ensureCalendarContext(PlannerCalendar.current)
         if let cached = calendarIndex.cachedDay(day) {
             if projectionGeneration != calendarIndex.generation {
                 virtualTasks.merge(calendarIndex.projectedByID, uniquingKeysWith: { _, latest in latest })
@@ -257,7 +373,8 @@ final class AppStore: NSObject, ObservableObject {
         let end = PlannerCalendar.current.date(byAdding: .day, value: 1, to: first) ?? first
         // A cheap real-task fallback stays usable while recurrence indexing runs off the UI thread.
         let fallback = indexedTasks.filter {
-            guard $0.status == .active || $0.status == .completed, let start = $0.startDate ?? $0.dueDate else { return false }
+            guard $0.status == .active || $0.status == .completed || $0.status == .wontDo,
+                  let start = $0.startDate ?? $0.dueDate else { return false }
             if ($0.excludedOccurrences ?? []).contains(start), $0.seriesRootID == nil { return false }
             if $0.isAllDay || $0.startDate == nil { return PlannerCalendar.current.isDate(start, inSameDayAs: first) }
             return start < end && ($0.calendarEndDate ?? start.addingTimeInterval(900)) > first
@@ -268,10 +385,14 @@ final class AppStore: NSObject, ObservableObject {
         return fallback
     }
     func prepareCalendarIndex(around date: Date? = nil, force: Bool = false) {
+        let calendar = PlannerCalendar.current
+        ensureCalendarContext(calendar)
         let anchor = PlannerCalendar.current.startOfDay(for: date ?? planner.anchor)
         calendarNavigationAnchor = anchor
         let leading = PlannerCalendar.current.date(byAdding: .day, value: -7, to: anchor) ?? anchor
-        let trailing = PlannerCalendar.current.date(byAdding: .day, value: planner.mode == .agenda ? 29 : 13, to: anchor) ?? anchor
+        let visibleDays = planner.mode == .fourDays ? planner.customDayCount : (planner.mode == .week ? 7 : 1)
+        let trailingDays = planner.mode == .agenda ? 29 : max(13, visibleDays + 6)
+        let trailing = PlannerCalendar.current.date(byAdding: .day, value: trailingDays, to: anchor) ?? anchor
         if !force, calendarIndex.cachedDay(anchor) != nil, calendarIndex.cachedDay(leading) != nil, calendarIndex.cachedDay(trailing) != nil { return }
         // One in-flight window already covers nearby dates; do not cancel it at every day boundary.
         if !force, let requested = indexRequestedAnchor, indexBuild != nil,
@@ -285,7 +406,7 @@ final class AppStore: NSObject, ObservableObject {
             // Coalesce bursts before starting recurrence work, including reversal.
             do { try await Task.sleep(nanoseconds: 30_000_000) } catch { return }
             let prepared = await Task.detached(priority: .userInitiated) {
-                let index = PlannerCalendarIndex(radius: radius); index.replaceTasks(tasks); _ = index.day(anchor); return index
+                let index = PlannerCalendarIndex(radius: radius); index.replaceTasks(tasks); _ = index.day(anchor, calendar: calendar); return index
             }.value
             guard let self, revision == self.indexRequest, !Task.isCancelled else { return }
             self.calendarIndex = prepared; self.projectionGeneration = 0; self.indexBuild = nil
@@ -296,18 +417,41 @@ final class AppStore: NSObject, ObservableObject {
     func plannerMatches(_ task: ManagedTask, search: String, includeTrash: Bool = false, includeCompleted: Bool = false) -> Bool {
         planner.filter.matches(task, search: search, includeTrash: includeTrash, includeCompleted: includeCompleted)
     }
+    func plannerCalendarTasks(on day: Date, search: String) -> [ManagedTask] {
+        plannerDaySnapshot(on: day, search: search).tasks
+    }
+
+    func plannerDaySnapshot(on day: Date, search: String) -> PlannerDaySnapshot {
+        let calendar = PlannerCalendar.current
+        ensureCalendarContext(calendar)
+        let first = calendar.startOfDay(for: day)
+        let key = PlannerDaySnapshotKey(taskRevision: taskDataRevision, calendarRevision: planner.calendarRevision,
+            eventRevision: calendarEventRevision, day: first, calendar: calendar, filter: planner.filter, search: search)
+        if let cached = daySnapshotCache.first(where: { $0.0 == key }) { return cached.1 }
+        let tasks = calendarTasks(on: first).filter { plannerMatches($0, search: search) }
+        let snapshot = PlannerDaySnapshot(tasks: tasks, events: plannerEvents(on: first, search: search), day: first, calendar: calendar)
+        if daySnapshotCache.count >= 128 { daySnapshotCache.removeFirst() }
+        daySnapshotCache.append((key, snapshot))
+        return snapshot
+    }
+
     func plannerEvents(on day: Date, search: String) -> [GoogleCalendarEventSnapshot] {
-        let first = PlannerCalendar.current.startOfDay(for: day)
-        let end = PlannerCalendar.current.date(byAdding: .day, value: 1, to: first) ?? first
-        return googleCalendarEvents.filter { $0.startDate < end && $0.endDate > first && planner.filter.matches($0, search: search) }
+        let calendar = PlannerCalendar.current
+        let first = calendar.startOfDay(for: day)
+        if let cached = eventDayCache.first(where: { $0.0 == first && $0.1 == calendar && $0.2 == planner.filter && $0.3 == search && $0.4 == calendarEventRevision }) { return cached.5 }
+        let end = calendar.date(byAdding: .day, value: 1, to: first) ?? first
+        let result = googleCalendarEvents.filter { $0.startDate < end && $0.endDate > first && planner.filter.matches($0, search: search) }
+        if eventDayCache.count >= 128 { eventDayCache.removeFirst() }
+        eventDayCache.append((first, calendar, planner.filter, search, calendarEventRevision, result))
+        return result
     }
     func task(id: UUID) -> ManagedTask? {
         if let index = taskPositions[id], state.managedTasks.indices.contains(index), state.managedTasks[index].id == id {
-            return state.managedTasks[index]
+            return TaskSeriesEditing.displayedRoot(state.managedTasks[index])
         }
         // Validate positions because an operation can add/remove a task before save().
         if let index = state.managedTasks.firstIndex(where: { $0.id == id }) {
-            taskPositions[id] = index; return state.managedTasks[index]
+            taskPositions[id] = index; return TaskSeriesEditing.displayedRoot(state.managedTasks[index])
         }
         taskPositions.removeValue(forKey: id)
         return virtualTasks[id]
@@ -321,10 +465,11 @@ final class AppStore: NSObject, ObservableObject {
         taskPositions = Dictionary(state.managedTasks.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
         listPositions = Dictionary(state.taskLists.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
         countCache.removeAll()
+        visibleTasksCache.removeAll(keepingCapacity: true)
     }
     func resolvedTask(id: UUID) -> ManagedTask? {
         guard let root = task(id: id) else { return nil }
-        if root.repeatRule != nil, let date = root.startDate ?? root.dueDate, (root.excludedOccurrences ?? []).contains(date) {
+        if root.repeatRule != nil || root.seriesVersions != nil, let date = root.occurrenceDate ?? root.startDate ?? root.dueDate, (root.excludedOccurrences ?? []).contains(date) {
             return task(id: RecurrenceProjection.occurrenceID(root: id, date: date)) ?? root
         }
         return root
@@ -333,7 +478,8 @@ final class AppStore: NSObject, ObservableObject {
         guard !state.managedTasks.contains(where: { $0.id == id }), let task = virtualTasks[id],
               let root = task.seriesRootID, let date = task.occurrenceDate,
               let index = state.managedTasks.firstIndex(where: { $0.id == root }) else { return }
-        var latest = state.managedTasks[index]
+        var latest = task
+        latest.seriesVersions = nil
         latest.id = task.id; latest.seriesRootID = root; latest.occurrenceDate = date
         latest.startDate = task.startDate; latest.plannedEndDate = task.startDate.map { $0.addingTimeInterval(Double(latest.durationMinutes * 60)) }
         latest.status = .active; latest.completedAt = nil; latest.repeatRule = nil; latest.excludedOccurrences = nil; latest.nextOccurrenceID = nil
@@ -343,12 +489,12 @@ final class AppStore: NSObject, ObservableObject {
     }
     private func editableOccurrenceID(_ id: UUID) -> UUID {
         materialize(id)
-        guard let root = task(id: id), root.repeatRule != nil, root.seriesRootID == nil,
-              let date = root.startDate ?? root.dueDate,
+        guard let root = task(id: id), root.repeatRule != nil || root.seriesVersions != nil, root.seriesRootID == nil,
+              let date = root.occurrenceDate ?? root.startDate ?? root.dueDate,
               let index = state.managedTasks.firstIndex(where: { $0.id == id }) else { return id }
         let occurrenceID = RecurrenceProjection.occurrenceID(root: root.id, date: date)
         if !state.managedTasks.contains(where: { $0.id == occurrenceID }) {
-            var copy = root; copy.id = occurrenceID; copy.seriesRootID = id; copy.occurrenceDate = date
+            var copy = root; copy.seriesVersions = nil; copy.id = occurrenceID; copy.seriesRootID = id; copy.occurrenceDate = date
             copy.repeatRule = nil; copy.excludedOccurrences = nil; copy.nextOccurrenceID = nil
             copy.sourceID = nil; copy.tickTickBaseline = nil
             state.managedTasks.append(copy)
@@ -358,40 +504,24 @@ final class AppStore: NSObject, ObservableObject {
         }
         return occurrenceID
     }
-    func updateSeriesEdits(from original: ManagedTask, to draft: ManagedTask) {
-        let rootID = original.seriesRootID ?? original.id
-        guard let rootIndex = state.managedTasks.firstIndex(where: { $0.id == rootID }) else { return }
+    func updateSeriesEdits(from original: ManagedTask, to draft: ManagedTask,
+                           scope: TaskEditScope = .series, replaceExceptions: Bool = false) {
+        if scope == .occurrence { updateManagedTaskEdits(from: original, to: draft); return }
+        guard !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         recordTaskUndo()
-        let shift = draft.startDate.flatMap { new in original.startDate.map { new.timeIntervalSince($0) } } ?? 0
-        for index in state.managedTasks.indices where state.managedTasks[index].id == rootID || state.managedTasks[index].seriesRootID == rootID {
-            var value = state.managedTasks[index]
-            if original.title != draft.title { value.title = draft.title }
-            if original.description != draft.description { value.description = draft.description }
-            if original.notes != draft.notes { value.notes = draft.notes }
-            if original.listID != draft.listID { value.listID = draft.listID }
-            if original.tags != draft.tags { value.tags = draft.tags }
-            if original.priority != draft.priority { value.priority = draft.priority }
-            if original.checklist != draft.checklist { value.checklist = draft.checklist }
-            if original.attachments != draft.attachments { value.attachments = draft.attachments }
-            if original.reminders != draft.reminders { value.reminders = draft.reminders }
-            if original.repeatRule != draft.repeatRule, value.id == rootID { value.repeatRule = draft.repeatRule }
-            if original.isAllDay != draft.isAllDay { value.isAllDay = draft.isAllDay }
-            if original.timeZoneID != draft.timeZoneID { value.timeZoneID = draft.timeZoneID }
-            if original.startDate != draft.startDate {
-                value.startDate = draft.startDate == nil ? nil : value.startDate?.addingTimeInterval(shift)
-                value.occurrenceDate = value.occurrenceDate?.addingTimeInterval(shift)
-                value.excludedOccurrences = value.excludedOccurrences?.map { $0.addingTimeInterval(shift) }
-            }
-            if original.durationMinutes != draft.durationMinutes { value.durationMinutes = draft.durationMinutes }
-            value.plannedEndDate = value.startDate.map { $0.addingTimeInterval(Double(value.durationMinutes * 60)) }
-            if original.dueDate != draft.dueDate {
-                if let new = draft.dueDate, let old = original.dueDate { value.dueDate = value.dueDate?.addingTimeInterval(new.timeIntervalSince(old)) }
-                else { value.dueDate = draft.dueDate }
-            }
-            TaskEngine.updateTask(value, in: &state)
-        }
-        if draft.repeatRule == nil { state.managedTasks[rootIndex].excludedOccurrences = nil }
+        TaskSeriesEditing.apply(from: original, to: draft, scope: scope,
+                                replaceExceptions: replaceExceptions, in: &state)
         save()
+    }
+
+    func seriesRoot(for task: ManagedTask) -> ManagedTask? {
+        let id = task.seriesRootID ?? task.id
+        return state.managedTasks.first { $0.id == id && ($0.repeatRule != nil || $0.seriesVersions != nil) }
+    }
+
+    func seriesRule(for task: ManagedTask) -> TaskRepeatRule? {
+        guard let root = seriesRoot(for: task), let date = task.occurrenceDate ?? task.startDate ?? task.dueDate else { return nil }
+        return TaskSeriesEditing.versions(of: root).last { $0.from <= date }?.template.repeatRule
     }
 
     func recordTaskUndo() { if pendingUndo == nil { pendingUndo = state.managedTasks } }
@@ -418,12 +548,15 @@ final class AppStore: NSObject, ObservableObject {
     }
     func bulkTrash(_ ids: Set<UUID>) {
         recordTaskUndo()
-        for id in ids { materialize(id); TaskEngine.trash(id, in: &state) }
+        for id in ids { TaskEngine.trash(editableOccurrenceID(id), in: &state) }
         planner.selectedIDs = []; selectedTaskID = nil; save()
     }
     func bulkComplete(_ ids: Set<UUID>, completed: Bool = true) {
         recordTaskUndo()
-        for id in ids { materialize(id); TaskEngine.setCompleted(id, completed: completed, in: &state) }
+        for id in ids {
+            let target = task(id: id)?.seriesVersions != nil ? editableOccurrenceID(id) : id
+            materialize(target); TaskEngine.setCompleted(target, completed: completed, in: &state)
+        }
         save()
     }
     func reorderTask(_ id: UUID, before target: UUID) {
@@ -436,6 +569,10 @@ final class AppStore: NSObject, ObservableObject {
         for index in state.managedTasks.indices { state.managedTasks[index].sortOrder = positions[state.managedTasks[index].id] ?? 0 }
         planner.sort = .manual; save()
     }
+    func subtasks(of parentID: UUID) -> [ManagedTask] {
+        TaskHierarchy.children(of: parentID, in: state.managedTasks)
+    }
+
     func addSubtask(to parent: UUID, title: String) {
         guard task(id: parent) != nil else { return }; recordTaskUndo()
         let parentID = editableOccurrenceID(parent)
@@ -445,25 +582,26 @@ final class AppStore: NSObject, ObservableObject {
     }
     func editSeries(_ id: UUID, change: (inout ManagedTask) -> Void) {
         guard let occurrence = task(id: id) else { return }
-        let rootID = occurrence.seriesRootID ?? id
-        recordTaskUndo()
-        if var root = task(id: rootID) { change(&root); TaskEngine.updateTask(root, in: &state) }
-        for index in state.managedTasks.indices where state.managedTasks[index].seriesRootID == rootID && state.managedTasks[index].status == .active {
-            var value = state.managedTasks[index]; change(&value); TaskEngine.updateTask(value, in: &state)
-        }
-        save()
+        var draft = occurrence; change(&draft)
+        updateSeriesEdits(from: occurrence, to: draft)
     }
 
     var scheduledManagedTasks: [ManagedTask] {
-        state.managedTasks.filter { $0.status != .trashed && $0.startDate != nil }
+        state.managedTasks.map(TaskSeriesEditing.displayedRoot).filter { $0.status != .trashed && $0.startDate != nil }
             .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
     }
 
     func matrixTasks(in quadrant: EisenhowerQuadrant) -> [ManagedTask] {
-        state.managedTasks.filter {
-            ($0.status == .active || (planner.filter.showCompleted && $0.status == .completed))
-                && $0.quadrant == quadrant
-        }.sorted { $0.sortOrder < $1.sortOrder }
+        let now = Date()
+        let key = projectionKey(search: planner.search, kind: "matrix", now: now)
+        return projectionCache.value(for: key, now: now) {
+            let tasks = planner.filter.sorted(visibleManagedTasks.filter {
+                $0.status == .active && plannerMatches($0, search: planner.search)
+            }, by: planner.sort)
+            var snapshot = PlannerTaskSnapshot(tasks: tasks)
+            for task in tasks { snapshot.byQuadrant[task.quadrant, default: []].append(task) }
+            return snapshot
+        }.byQuadrant[quadrant] ?? []
     }
 
     var browserExtensionIsConnected: Bool {
@@ -506,11 +644,6 @@ final class AppStore: NSObject, ObservableObject {
     var selectedGroup: BlockGroup? {
         guard let selectedGroupID else { return groups.first }
         return groups.first { $0.id == selectedGroupID }
-    }
-
-    var lastSyncIsToday: Bool {
-        guard let date = state.lastSuccessfulSync else { return false }
-        return Calendar.current.isDateInToday(date)
     }
 
     func groupIsUnlocked(_ group: BlockGroup) -> Bool {
@@ -597,6 +730,10 @@ final class AppStore: NSObject, ObservableObject {
     func hasPendingGroupRule(_ id: UUID) -> Bool { state.pendingGroupRules?[id] != nil }
     func applyGroupRule(_ id: UUID) {
         guard let draft = state.pendingGroupRules?[id], let index = state.groups.firstIndex(where: { $0.id == id }) else { return }
+        if state.groups[index].isEnabled && !draft.isEnabled {
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .disableGroup)
+            return
+        }
         if domainCoverageChanged(from: state.groups[index], to: draft) {
             pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .applyGroupRule)
             return
@@ -626,6 +763,11 @@ final class AppStore: NSObject, ObservableObject {
     func setGroupUsesAllTasks(_ id: UUID, value: Bool) { editGroup(id) { $0.requiresAllTodayTasks = value; if value { $0.requiredTaskIDs.removeAll() } } }
     func setGroupEnabled(_ id: UUID, value: Bool) {
         guard let index = state.groups.firstIndex(where: { $0.id == id }) else { return }
+        if !value {
+            guard state.groups[index].isEnabled else { return }
+            pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .disableGroup)
+            return
+        }
         if value, let draft = state.pendingGroupRules?[id], domainCoverageChanged(from: state.groups[index], to: draft) {
             pendingProtectedResourceChange = ProtectedResourceChange(groupID: id, operation: .applyGroupRule)
             return
@@ -706,7 +848,7 @@ final class AppStore: NSObject, ObservableObject {
     /// Apply only after explicit confirmation; keep protection and all unrelated rules enabled.
     @discardableResult
     func confirmProtectedResourceChange(_ confirmation: String) throws -> Bool {
-        guard confirmation == "ПОДТВЕРДИТЬ", let change = pendingProtectedResourceChange,
+        guard let change = pendingProtectedResourceChange, confirmation == change.confirmationWord,
               let index = state.groups.firstIndex(where: { $0.id == change.groupID }) else { return false }
         switch change.operation {
         case .update(let resourceID, let rawName, let identifier):
@@ -733,11 +875,19 @@ final class AppStore: NSObject, ObservableObject {
         case .applyGroupRule:
             guard let draft = state.pendingGroupRules?[change.groupID] else { return false }
             state.groups[index] = draft; state.pendingGroupRules?.removeValue(forKey: change.groupID)
+        case .disableGroup:
+            guard state.groups[index].isEnabled else { return false }
+            state.groups[index].isEnabled = false
+            state.pendingGroupRules?.removeValue(forKey: change.groupID)
         }
         state.disciplineStreak = 0
         state.disciplineLastCountedDayKey = DayKey.make(from: Date())
         for index in state.habits.indices { state.habits[index].resetCurrentStreak() }
-        appendEvent(.taskSync, "Подтверждено изменение заблокированных доменов. Серия защиты и текущие серии привычек обнулены.")
+        if case .disableGroup = change.operation {
+            appendEvent(.taskSync, "Правило «\(state.groups[index].name)» отключено. Серия защиты и текущие серии привычек обнулены.")
+        } else {
+            appendEvent(.taskSync, "Подтверждено изменение заблокированных доменов. Серия защиты и текущие серии привычек обнулены.")
+        }
         pendingProtectedResourceChange = nil
         saveAndApply()
         return true
@@ -771,8 +921,8 @@ final class AppStore: NSObject, ObservableObject {
     func addLocalTask(named rawName: String) {
         let title = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        state.localTasks.append(FocusTask(title: title))
-        saveAndApply()
+        _ = createPlannerTask(ManagedTask(title: title,
+            startDate: PlannerCalendar.current.startOfDay(for: Date()), isAllDay: true))
     }
 
     func toggleLocalTask(_ id: String) {
@@ -819,19 +969,70 @@ final class AppStore: NSObject, ObservableObject {
         save()
     }
 
+    func setManagedTaskWontDo(_ id: UUID, skipped: Bool) {
+        recordTaskUndo()
+        let target = editableOccurrenceID(id)
+        guard let index = state.managedTasks.firstIndex(where: { $0.id == target }) else { return }
+        state.managedTasks[index].status = skipped ? .wontDo : .active
+        state.managedTasks[index].completedAt = nil
+        state.managedTasks[index].modifiedAt = Date()
+        save()
+    }
+
     func updateManagedTaskEdits(from original: ManagedTask, to draft: ManagedTask) {
         recordTaskUndo()
         let id = editableOccurrenceID(draft.id)
         var before = original, after = draft; before.id = id; after.id = id
-        if id != draft.id { before.repeatRule = nil; after.repeatRule = nil }
+        if seriesRoot(for: original) != nil { before.repeatRule = nil; after.repeatRule = nil }
         TaskEngine.applyEdits(from: before, to: after, in: &state)
         save()
     }
 
     func setManagedTaskCompleted(_ id: UUID, completed: Bool) {
         recordTaskUndo()
+        let target = task(id: id)?.seriesVersions != nil ? editableOccurrenceID(id) : id
+        materialize(target)
+        TaskEngine.setCompleted(target, completed: completed, in: &state)
+        save()
+    }
+
+    func moveManagedTask(_ id: UUID, toKanbanStage stage: TaskKanbanStage) {
+        guard task(id: id)?.effectiveKanbanStage != stage else { return }
+        recordTaskUndo()
+        let target = task(id: id)?.seriesVersions != nil ? editableOccurrenceID(id) : id
+        materialize(target)
+        guard let initialIndex = state.managedTasks.firstIndex(where: { $0.id == target }) else { pendingUndo = nil; return }
+        let now = Date()
+        state.managedTasks[initialIndex].kanbanStage = stage
+        if stage == .done {
+            TaskEngine.setCompleted(target, completed: true, in: &state, now: now)
+        } else if state.managedTasks[initialIndex].status != .active {
+            TaskEngine.setCompleted(target, completed: false, in: &state, now: now)
+        }
+        guard let index = state.managedTasks.firstIndex(where: { $0.id == target }) else { pendingUndo = nil; return }
+        state.managedTasks[index].modifiedAt = now
+        state.managedTasks[index].changeHistory.insert(
+            TaskChange(date: now, summary: "Этап канбана: \(stage.title)"), at: 0
+        )
+        save()
+    }
+
+    func moveManagedTask(_ id: UUID, toList listID: UUID) {
+        guard state.taskLists.contains(where: { $0.id == listID }) || listID == TaskList.inboxID,
+              task(id: id)?.listID != listID else { return }
+        recordTaskUndo()
         materialize(id)
-        TaskEngine.setCompleted(id, completed: completed, in: &state)
+        guard let index = state.managedTasks.firstIndex(where: { $0.id == id }) else {
+            pendingUndo = nil
+            return
+        }
+        let now = Date()
+        state.managedTasks[index].listID = listID
+        state.managedTasks[index].modifiedAt = now
+        let listName = taskList(id: listID)?.name ?? TaskList.inbox.name
+        state.managedTasks[index].changeHistory.insert(
+            TaskChange(date: now, summary: "Проект: \(listName)"), at: 0
+        )
         save()
     }
 
@@ -839,6 +1040,31 @@ final class AppStore: NSObject, ObservableObject {
         recordTaskUndo()
         materialize(id)
         if TaskEngine.duplicate(id, in: &state) != nil { save() }
+    }
+
+    func requestTaskDeletion(_ ids: Set<UUID>) {
+        let existing = ids.filter { task(id: $0) != nil }
+        guard !existing.isEmpty else { return }
+        if existing.contains(where: { task(id: $0).map { $0.repeatRule != nil || $0.seriesRootID != nil } ?? false }) {
+            pendingTaskDeletion = existing
+        } else {
+            bulkTrash(existing)
+        }
+    }
+
+    func confirmTaskDeletion(entireSeries: Bool) {
+        let ids = pendingTaskDeletion
+        pendingTaskDeletion = []
+        guard !ids.isEmpty else { return }
+        if entireSeries {
+            let targets = Set(ids.compactMap { task(id: $0).map { $0.seriesRootID ?? $0.id } })
+            recordTaskUndo()
+            for id in targets { TaskEngine.trash(id, in: &state) }
+            planner.selectedIDs = []; selectedTaskID = nil
+            save()
+        } else {
+            bulkTrash(ids)
+        }
     }
 
     func trashManagedTask(_ id: UUID) {
@@ -899,6 +1125,15 @@ final class AppStore: NSObject, ObservableObject {
         save()
     }
 
+    func removeTaskFolder(_ id: UUID) {
+        guard state.taskFolders.contains(where: { $0.id == id }) else { return }
+        for index in state.taskLists.indices where state.taskLists[index].folderID == id {
+            state.taskLists[index].folderID = nil
+        }
+        state.taskFolders.removeAll { $0.id == id }
+        save()
+    }
+
     func addTaskList(named rawName: String, folderID: UUID? = nil) {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
@@ -907,6 +1142,23 @@ final class AppStore: NSObject, ObservableObject {
             name: name,
             sortOrder: (state.taskLists.map(\.sortOrder).max() ?? 0) + 1
         ))
+        save()
+    }
+
+    func removeTaskList(_ id: UUID) {
+        guard id != TaskList.inboxID, state.taskLists.contains(where: { $0.id == id }) else { return }
+        let now = Date()
+        for index in state.managedTasks.indices where state.managedTasks[index].listID == id {
+            state.managedTasks[index].listID = TaskList.inboxID
+            state.managedTasks[index].modifiedAt = now
+            state.managedTasks[index].changeHistory.insert(
+                TaskChange(date: now, summary: "Список удалён, задача перенесена во «Входящие»"),
+                at: 0
+            )
+        }
+        state.taskLists.removeAll { $0.id == id }
+        listPositions.removeValue(forKey: id)
+        if taskSidebarSelection == .list(id) { taskSidebarSelection = .inbox }
         save()
     }
 
@@ -931,6 +1183,15 @@ final class AppStore: NSObject, ObservableObject {
         TaskEngine.finishPomodoro(in: &state, now: now)
         save()
     }
+    /// The native QA app keeps the local focus clock while external services stay disabled.
+    func startIsolatedFocusClock() {
+        guard HidigRuntime.isIsolated, !persistenceFailedToLoad, focusTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.checkFocusCompletion() }
+        }
+        focusTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
     func pausePomodoro() {
         TaskEngine.pausePomodoro(in: &state)
         save()
@@ -950,21 +1211,26 @@ final class AppStore: NSObject, ObservableObject {
     var pomodoroSessions: [PomodoroSession] { state.pomodoroSessions }
 
     func prepareTickTickImport() async {
+        guard servicesEnabled else { return }
         guard connectionState == .connected, !isImportingTickTick else { return }
         isImportingTickTick = true
         defer { isImportingTickTick = false }
+        pendingTickTickImport = nil
+        tickTickImportPreview = nil
+        integration.tickTickImportError = nil
         do {
             let start = Calendar.current.date(byAdding: .month, value: -2, to: Date()) ?? Date()
             let snapshot = try await tickTickService.fullImportSnapshot(since: start)
             pendingTickTickImport = snapshot
             tickTickImportPreview = snapshot.preview
         } catch {
-            errorMessage = error.localizedDescription
+            integration.tickTickImportError = "Не удалось подготовить импорт: \(error.localizedDescription)"
         }
     }
 
     func performPreparedTickTickImport() {
-        guard let snapshot = pendingTickTickImport else { return }
+        guard servicesEnabled else { return }
+        guard connectionState == .connected, let snapshot = pendingTickTickImport else { return }
         do {
             writer.flush()
             _ = try repository.createBackup()
@@ -972,22 +1238,23 @@ final class AppStore: NSObject, ObservableObject {
                 folders: snapshot.folders,
                 lists: snapshot.lists,
                 records: snapshot.records,
-                into: &state, completeSnapshot: true
+                into: &state, preserveExisting: true
             )
-            save()
+            saveAndApply()
             pendingTickTickImport = nil
             tickTickImportPreview = nil
         } catch {
-            errorMessage = "Импорт остановлен: не удалось создать резервную копию. \(error.localizedDescription)"
+            integration.tickTickImportError = "Импорт остановлен: не удалось создать резервную копию. \(error.localizedDescription)"
         }
     }
 
     func connectGoogleCalendar(clientID: String, clientSecret: String?) async {
+        guard servicesEnabled else { return }
         guard !isGoogleSynchronizing else { return }
         isGoogleSynchronizing = true
         defer { isGoogleSynchronizing = false }
         do {
-            UserDefaults.standard.set(clientID.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "googleOAuthClientID")
+            HidigRuntime.defaults.set(clientID.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "googleOAuthClientID")
             try await googleCalendarService.authorize(clientID: clientID, clientSecret: clientSecret)
             googleCalendars = try await googleCalendarService.calendars()
             state.googleCalendarConnection.isConnected = true
@@ -1002,6 +1269,7 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func disconnectGoogleCalendar() {
+        guard servicesEnabled else { return }
         googleCalendarService.disconnect()
         googleCalendars = []
         googleCalendarEvents = []
@@ -1016,6 +1284,7 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func refreshGoogleCalendars() async {
+        guard servicesEnabled else { return }
         guard state.googleCalendarConnection.isConnected, !isGoogleSynchronizing else { return }
         isGoogleSynchronizing = true
         defer { isGoogleSynchronizing = false }
@@ -1032,6 +1301,7 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func linkTaskToGoogle(_ taskID: UUID, calendarID: String) async {
+        guard servicesEnabled else { return }
         guard let index = state.managedTasks.firstIndex(where: { $0.id == taskID }),
               state.managedTasks[index].startDate != nil else { return }
         do {
@@ -1046,12 +1316,14 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func unlinkTaskFromGoogle(_ taskID: UUID) {
+        guard servicesEnabled else { return }
         guard let index = state.managedTasks.firstIndex(where: { $0.id == taskID }) else { return }
         GoogleSyncEngine.unlink(&state.managedTasks[index])
         save()
     }
 
     private func synchronizeGoogleCalendar() async throws {
+        guard servicesEnabled else { return }
         let calendarIDs = state.googleCalendarConnection.selectedCalendarIDs
         guard !calendarIDs.isEmpty else { return }
         let start = Calendar.current.date(byAdding: .month, value: -2, to: Date()) ?? Date()
@@ -1141,67 +1413,55 @@ final class AppStore: NSObject, ObservableObject {
         save()
     }
 
-    func refreshConnectionAndTasks() async {
-        guard !isSynchronizing else { return }
+    /// Explicitly requested by the import screen; never called at launch or on a timer.
+    func checkTickTickImportConnection() async {
+        guard servicesEnabled else { return }
+        guard !isSynchronizing, !isImportingTickTick else { return }
         isSynchronizing = true
+        defer { isSynchronizing = false }
+        pendingTickTickImport = nil
+        tickTickImportPreview = nil
+        integration.tickTickImportError = nil
         connectionState = .checking
-        let connection = await tickTickService.connectionState()
-        connectionState = connection
-        if connection == .connected { await performTaskSynchronization() }
-        isSynchronizing = false
+        connectionState = await tickTickService.connectionState()
     }
 
     func connectTickTick() async {
-        guard !isSynchronizing else { return }
+        guard servicesEnabled else { return }
+        guard !isSynchronizing, !isImportingTickTick else { return }
         isSynchronizing = true
         defer { isSynchronizing = false }
+        pendingTickTickImport = nil
+        tickTickImportPreview = nil
+        integration.tickTickImportError = nil
         connectionState = .connecting
         do {
             try await tickTickService.authenticate()
             connectionState = await tickTickService.connectionState()
-            if connectionState == .connected { await performTaskSynchronization() }
+
         } catch {
             connectionState = .failed(error.localizedDescription)
-            errorMessage = error.localizedDescription
+            integration.tickTickImportError = error.localizedDescription
         }
     }
 
-    func synchronizeTasks() async {
-        guard connectionState == .connected, !isSynchronizing else { return }
+    func disconnectTickTick() async {
+        guard servicesEnabled else { return }
+        guard !isSynchronizing, !isImportingTickTick else { return }
         isSynchronizing = true
         defer { isSynchronizing = false }
-        await performTaskSynchronization()
-    }
-    private func performTaskSynchronization() async {
         do {
-            let tasks = try await tickTickService.todayTasks()
-            if state.managedTasks.contains(where: { $0.sourceName == "TickTick" }) {
-                var since = state.lastPlannerSyncAt.map { $0.addingTimeInterval(-86400) }
-                    ?? Calendar.current.date(byAdding: .month, value: -2, to: Date()) ?? Date()
-                let repairsHierarchy = state.tickTickHierarchyVersion != 2
-                if repairsHierarchy {
-                    since = min(since, state.managedTasks.filter { $0.sourceName == "TickTick" }.compactMap(\.completedAt).min() ?? since)
-                }
-                let snapshot = try await tickTickService.fullImportSnapshot(since: since, knownTaskSourceIDs: Set(state.managedTasks.compactMap(\.sourceID)))
-                if state.lastPlannerSyncAt == nil || repairsHierarchy { writer.flush(); _ = try repository.createBackup(label: "before-planner-reconciliation") }
-                _ = TaskEngine.importTickTick(folders: snapshot.folders, lists: snapshot.lists,
-                                             records: snapshot.records, into: &state, completeSnapshot: true)
-                state.tickTickHierarchyVersion = 2
-                state.lastPlannerSyncAt = Date()
-            }
-            let previous = state.cachedTasks
-            state.cachedTasks = tasks
-            state.lastSuccessfulSync = Date()
-            if previous != tasks {
-                appendEvent(.taskSync, "TickTick: получено задач на сегодня — \(tasks.count).")
-            }
-            recordNewlyUnlockedGroups()
-            saveAndApply()
+            try await tickTickService.signOut()
+            finishTickTickDisconnect()
         } catch {
-            connectionState = .failed(error.localizedDescription)
-            appendEvent(.error, "TickTick: \(error.localizedDescription)")
-            saveAndApply()
+            integration.tickTickImportError = "Не удалось отключить импорт TickTick: \(error.localizedDescription)"
         }
+    }
+
+    func finishTickTickDisconnect() {
+        connectionState = .signedOut
+        pendingTickTickImport = nil
+        tickTickImportPreview = nil
     }
 
     func copyCLIInstallCommand() {
@@ -1210,7 +1470,7 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func revealBrowserExtension() {
-        guard let projectURL = Bundle.module.resourceURL?
+        guard let projectURL = HidigResources.bundle.resourceURL?
             .appendingPathComponent("BrowserExtension", isDirectory: true),
               FileManager.default.fileExists(atPath: projectURL.path) else {
             errorMessage = "Папка браузерного расширения не найдена в приложении."
@@ -1228,6 +1488,7 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func launchSafariContainer() {
+        guard servicesEnabled else { return }
         guard let url = safariContainerURL else {
             errorMessage = "Safari-модуль не установлен. Распакуйте архив и перенесите «hidigFocus Safari» в папку «Программы»."
             return
@@ -1250,13 +1511,13 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     var browserExtensionURL: URL? {
-        guard let url = Bundle.module.resourceURL?.appendingPathComponent("BrowserExtension", isDirectory: true),
+        guard let url = HidigResources.bundle.resourceURL?.appendingPathComponent("BrowserExtension", isDirectory: true),
               FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) else { return nil }
         return url
     }
 
     var safariExtensionURL: URL? {
-        guard let url = Bundle.module.resourceURL?.appendingPathComponent("SafariExtension", isDirectory: true),
+        guard let url = HidigResources.bundle.resourceURL?.appendingPathComponent("SafariExtension", isDirectory: true),
               FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) else { return nil }
         return url
     }
@@ -1277,11 +1538,13 @@ final class AppStore: NSObject, ObservableObject {
 
     func selectJournalEntry(_ entry: JournalEntry) {
         flushJournalWrites()
+        if let failure = journalWriteReceipt.failure { errorMessage = "Не удалось сохранить текущую запись: " + failure; return }
         do {
+            let contents = try journalRepository.read(entry)
             isLoadingJournal = true
             selectedJournalEntry = entry
             journalTitleDraft = entry.title
-            journalDraft = try journalRepository.read(entry)
+            journalDraft = contents
             journalSaveState = .saved(entry.modifiedAt)
             isLoadingJournal = false
         } catch {
@@ -1306,8 +1569,9 @@ final class AppStore: NSObject, ObservableObject {
     private func enqueueJournalWrite() {
         guard let (value, entry, revision) = pendingJournalValue else { return }
         pendingJournalValue = nil
-        journalWriter.async { [journalRepository, weak self] in
+        journalWriter.async { [journalRepository, journalWriteReceipt, weak self] in
             let result = Result { try journalRepository.write(value, to: entry) }
+            journalWriteReceipt.record(result)
             Task { @MainActor [weak self] in
                 guard let self, revision == self.journalRevision, self.selectedJournalEntry?.id == entry.id else { return }
                 switch result {
@@ -1326,6 +1590,7 @@ final class AppStore: NSObject, ObservableObject {
     func renameSelectedJournalEntry() {
         guard let entry = selectedJournalEntry else { return }
         flushJournalWrites()
+        if let failure = journalWriteReceipt.failure { errorMessage = failure; return }
         do {
             let renamed = try journalRepository.rename(entry, to: journalTitleDraft)
             selectedJournalEntry = renamed
@@ -1372,11 +1637,11 @@ final class AppStore: NSObject, ObservableObject {
         }
     }
 
-    private func scheduleSynchronization() {
+    private func scheduleLocalMaintenance() {
         syncTimer = Timer.scheduledTimer(
             timeInterval: 60,
             target: self,
-            selector: #selector(synchronizationTimerFired(_:)),
+            selector: #selector(localMaintenanceTimerFired(_:)),
             userInfo: nil,
             repeats: true
         )
@@ -1399,15 +1664,12 @@ final class AppStore: NSObject, ObservableObject {
         evaluateRunningApplications()
     }
 
-    @objc private func synchronizationTimerFired(_ timer: Timer) {
+    @objc private func localMaintenanceTimerFired(_ timer: Timer) {
         rollDisciplineForward()
         let day = Calendar.current.startOfDay(for: Date())
         if day != lastReminderDay { lastReminderDay = day; reminderService.refresh(state.managedTasks) }
-        Task {
-            await refreshConnectionAndTasks()
-            updateBlockingRules()
-            evaluateRunningApplications()
-        }
+        updateBlockingRules()
+        evaluateRunningApplications()
     }
 
     @objc private func workspaceApplicationChanged(_ notification: Notification) {
@@ -1498,10 +1760,6 @@ final class AppStore: NSObject, ObservableObject {
     private func loadJournalEntries(selectNewest: Bool) {
         do {
             journalEntries = try journalRepository.entries()
-            if journalEntries.isEmpty {
-                let entry = try journalRepository.createTodayEntry()
-                journalEntries = [entry]
-            }
             if selectNewest, let entry = journalEntries.first {
                 selectJournalEntry(entry)
             }
@@ -1525,7 +1783,29 @@ final class AppStore: NSObject, ObservableObject {
     }
 
     func save() {
+        // In-memory query freshness is independent of whether the loaded database
+        // is safe to overwrite. A load failure must keep its write guard intact.
+        let calendarChanged = indexedTasks != state.managedTasks
+        if calendarChanged {
+            // Keep the complete visible window until its replacement is ready.
+            // Clearing it here exposes a real-task-only fallback between every autosave.
+            taskDataRevision &+= 1
+            indexedTasks = state.managedTasks; rebuildTaskPositions(); calendarFallbackDays.removeAll(keepingCapacity: true); indexRequestedAnchor = nil; indexBuild?.cancel(); indexBuild = nil; indexRequest += 1
+            if virtualTasks.count > 50_000 {
+                let selectedVirtual = selectedTaskID.flatMap { virtualTasks[$0] }
+                virtualTasks.removeAll()
+                if let selectedVirtual { virtualTasks[selectedVirtual.id] = selectedVirtual }
+            }
+        }
+        prepareCalendarIndex(force: calendarChanged)
         guard !persistenceFailedToLoad else { return }
+        if calendarChanged {
+            reminderService.refresh(state.managedTasks)
+            if servicesEnabled {
+                updateBlockingRules()
+                evaluateRunningApplications()
+            }
+        }
         if let before = pendingUndo {
             if before != state.managedTasks {
                 undoEntries.append(TaskHistoryEntry(before: before, after: state.managedTasks))
@@ -1534,16 +1814,6 @@ final class AppStore: NSObject, ObservableObject {
             }
             pendingUndo = nil; updateUndoAvailability()
         }
-        if indexedTasks != state.managedTasks {
-            indexedTasks = state.managedTasks; rebuildTaskPositions(); calendarIndex.replaceTasks(indexedTasks); calendarFallbackDays.removeAll(keepingCapacity: true); indexRequestedAnchor = nil; indexBuild?.cancel(); indexBuild = nil; indexRequest += 1
-            if virtualTasks.count > 50_000 {
-                let selectedVirtual = selectedTaskID.flatMap { virtualTasks[$0] }
-                virtualTasks.removeAll()
-                if let selectedVirtual { virtualTasks[selectedVirtual.id] = selectedVirtual }
-            }
-            reminderService.refresh(state.managedTasks)
-        }
-        prepareCalendarIndex()
         saveRevision += 1
         let revision = saveRevision
         taskSaveState = .saving
@@ -1559,5 +1829,12 @@ final class AppStore: NSObject, ObservableObject {
     }
     @objc private func flushBeforeTermination() { writer.flush(); flushJournalWrites() }
     func flushPendingWrites() { writer.flush(); flushJournalWrites() }
+    var attachmentDirectoryURL: URL { repository.applicationSupportDirectory.appendingPathComponent("Attachments", isDirectory: true) }
+    func prepareForTermination() -> String? {
+        let failure = writer.flushFailure()
+        flushJournalWrites()
+        if let failure { return failure.localizedDescription }
+        return journalWriteReceipt.failure
+    }
 
 }

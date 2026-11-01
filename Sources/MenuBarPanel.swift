@@ -43,8 +43,7 @@ struct MenuBarPanel: View {
             HStack {
                 HidigDateButton(date: $selectedDate, compact: true)
                 Spacer()
-                SyncButton(showTitle: false)
-            }
+                }
             TextField("Добавить задачу", text: $quickTitle)
                 .textFieldStyle(HidigTextFieldStyle()).onSubmit {
                     guard !quickTitle.trimmingCharacters(in: .whitespaces).isEmpty else { return }

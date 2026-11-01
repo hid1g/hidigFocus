@@ -26,7 +26,7 @@
     CFPreferencesAppSynchronize(CFSTR("com.hidig.focus"));
     NSString *style = CFBridgingRelease(CFPreferencesCopyAppValue(
         CFSTR("appIconPreference"), CFSTR("com.hidig.focus")));
-    NSArray *styles = @[@"green", @"light", @"dark", @"rose", @"purple", @"aurora", @"blue", @"amber"];
+    NSArray *styles = @[@"doors", @"medallion", @"green", @"light", @"dark", @"rose", @"purple", @"aurora", @"blue", @"amber"];
     if (![style isKindOfClass:NSString.class] || ![styles containsObject:style]) style = @"green";
     NSBundle *bundle = [NSBundle bundleForClass:self.class];
     NSURL *url = [bundle URLForResource:style withExtension:@"png"];

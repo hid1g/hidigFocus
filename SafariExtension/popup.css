@@ -1,0 +1,12 @@
+:root { color-scheme: light dark; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; }
+body { width: 320px; margin: 0; }
+main { padding: 20px; }
+h1 { margin: 0 0 16px; font-size: 18px; }
+p { line-height: 1.45; }
+button { width: 100%; padding: 10px; border: 0; border-radius: 8px; background: #246e50; color: white; font: inherit; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+button:focus-visible { outline: 3px solid #76b69c; outline-offset: 3px; }
+#connect, #redirect { margin-top: 10px; }
+#missing-domains { overflow-wrap: anywhere; }
+.hint, #updated { font-size: 12px; opacity: .75; }
+#error { color: light-dark(#a62020, #ff9d9d); overflow-wrap: anywhere; }
